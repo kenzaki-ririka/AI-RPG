@@ -72,7 +72,7 @@
 
         const DEFAULT_CONFIG = {
             provider: PROVIDERS.GOOGLE,
-            model: "gemini-1.5-pro",
+            model: "gemini-2.5-pro",
             baseUrl: "https://generativelanguage.googleapis.com", // Default Google URL
             apiKey: ""
         };
@@ -273,6 +273,7 @@
                     content: `You are an RPG Game Master (DM). The player is exploring the world.
                     Current Player: ${player.name} (${player.class}).
                     Stats: ${JSON.stringify(player.stats)}.
+                    Skills: ${JSON.stringify(player.skills)}.
                     Inventory: ${JSON.stringify(player.items || [])}.
                     
                     The user performs an action. Describe the outcome in a RICH, ENGAGING, NOVEL-LIKE STYLE.
@@ -280,27 +281,46 @@
                     Style Guidelines:
                     - Use sensory details (what does the player see, hear, smell?).
                     - Be verbose rather than brief (3-5 paragraphs is good).
-                    - Provide clear guidance or "hooks" for what the player can do next (e.g. "You notice a glimmer in the dark corner...", "The path splits into two...").
-                    - If the player seems lost, give them a hint.
-
-                    IF THE USER INPUT CONTAINS A DICE ROLL (e.g. "(🎲 1d20: 15)"):
-                    - Respect the result.
-                    - If high (e.g. > 10 for d20), the action succeeds better.
-                    - If low (e.g. < 5 for d20), the action might fail or have consequences.
-                    - Mention the roll result in the narrative (e.g. "你掷出了15点，轻松跳过了陷阱").
+                    - Provide clear guidance or "hooks" for what the player can do next.
+                    
+                    If the user action implies learning, upgrading, or forgetting skills (e.g. "I study the tome", "I practice swordplay"), you can modify their skills.
 
                     IMPORTANT: Narrative MUST be in Simplified Chinese (简体中文).
                     
                     Return ONLY valid JSON:
                     {
                         "narrative": "string (Long, descriptive narrative)",
-                        "statChanges": { "hp": number, "mp": number, ... }, // Optional: Relative changes to stats
-                        "newItems": [ // Optional: Items found
+                        "statChanges": { "hp": number, "mp": number, ... },
+                        "newItems": [ 
                             { "name": "string", "type": "consumable"|"equipment"|"material", "effect": { "hp": number, "mp": number }, "count": number, "description": "string" }
                         ],
-                        "removedItems": ["string (Item Name)"], // Optional: Items used/lost
-                        "newEnemies": [ // Optional: Only if combat starts
-                            { "name": "string", "stats": { "hp": number, "maxHp": number, "attack": number, "defense": number, "speed": number } }
+                        "removedItems": ["string (Item Name)"],
+                        "newSkills": [
+                             { 
+                                "name": "string", 
+                                "type": "active"|"passive", 
+                                "damage": number, 
+                                "cost": number, 
+                                "costType": "mp"|"stamina", 
+                                "target": "single"|"aoe"|"self", 
+                                "statusEffects": ["string"],
+                                "description": "string" 
+                            }
+                        ],
+                        "removedSkills": ["string (Skill Name)"],
+                        "updatedSkills": [
+                             // Same structure as newSkills, will replace skill with same name
+                        ],
+                        "newEnemies": [
+                            { 
+                                "name": "string", 
+                                "stats": { "hp": number, "maxHp": number, "attack": number, "defense": number, "speed": number },
+                                "skills": ["string (Skill Name or Description)"],
+                                "traits": [
+                                    { "name": "string", "effect": "string (e.g. Lifesteal, Reflection)", "description": "string" }
+                                ],
+                                "description": "string (Visual description)"
+                            }
                         ]
                     }
                     `
@@ -313,52 +333,59 @@
         };
 
         // Prompt for Combat Phase (Multi-Enemy)
-        const getCombatPrompt = (player, enemies, action, targetIndex, history) => {
+        const getCombatPrompt = (player, enemies, action, targetIndex, history, showNarrative) => {
             const lastLog = history.length > 0 ? history[history.length - 1].text : "";
             
-            // Construct enemy state string
-            const enemyState = enemies.map((e, i) => `[${i}] ${e.name}: HP ${e.stats.hp}/${e.stats.maxHp}`).join(", ");
+            const enemyState = enemies.map((e, i) => {
+                const traits = e.traits ? e.traits.map(t => t.name).join(",") : "";
+                return `[${i}] ${e.name} (HP ${e.stats.hp}/${e.stats.maxHp}, Traits: ${traits})`;
+            }).join("\n");
             
-            // Construct player skills string for context
             const playerSkills = player.skills.map(s => `${s.name} (${s.type}, ${s.cost}${s.costType})`).join(", ");
+            const playerBuffs = player.buffs ? JSON.stringify(player.buffs) : "None";
 
             return [
                 {
                     role: "system",
-                    content: `You are an RPG Combat Narrator. 
-                    The player is fighting ${enemies.length} enemies.
+                    content: `You are an RPG Combat Narrator.
+                    Player: ${player.name} (HP ${player.stats.hp}/${player.stats.maxHp}, MP ${player.stats.mp}/${player.stats.maxMp}).
+                    Player Skills: ${playerSkills}
+                    Player Buffs: ${playerBuffs}
                     
-                    Player: ${player.name} (HP ${player.stats.hp}/${player.stats.maxHp}, ATK ${player.stats.attack}, DEF ${player.stats.defense}).
-                    Player Skills/Passives: ${playerSkills}
-                    Enemies: ${enemyState}
+                    Enemies:
+                    ${enemyState}
                     
                     Action: ${JSON.stringify(action)}
-                    Target Index: ${targetIndex} (The enemy being attacked by player)
+                    Target Index: ${targetIndex}
                     
-                    IF THE USER ACTION CONTAINS A DICE ROLL (e.g. "(🎲 1d20: 20)"):
-                    - Use it to determine hit/crit/miss if applicable.
-                    - High rolls (e.g. near max) should be critical hits or special effects.
-                    - Low rolls might miss.
-
-                    Style Guidelines:
-                    - Describe the combat moves vividly (sparks flying, heavy impacts, magical auras).
-                    - If the player uses a skill with effects (Freeze, Burn, Poison), describe those effects triggering on the enemy.
-                    - Account for Passive skills if relevant (e.g. if player has "Thick Skin", mention they took less damage).
-
-                    IMPORTANT: Narrative MUST be in Simplified Chinese (简体中文).
+                    Task:
+                    1. Calculate damage dealt by player (consider buffs, enemy traits like Defense/Reflection).
+                    2. Calculate enemy turns (enemies attack player, consider their skills/traits).
+                    3. Manage Buffs/Debuffs (duration decreases, some might expire).
+                    
+                    ${showNarrative ? "Provide a vivid combat description." : "Provide a very brief summary."}
                     
                     Return ONLY valid JSON:
                     {
-                        "narrative": "string (Vivid combat description)",
-                        "playerDamageTaken": number (Total damage player took from ALL enemies this turn),
+                        "narrative": "string",
+                        "playerStatChanges": { "hp": number, "mp": number, ... }, // Relative changes (e.g. -10 hp)
                         "enemiesUpdates": [
-                            { "index": number, "damageTaken": number, "statusAdded": "string (optional)" } // Damage taken by specific enemies
+                            { 
+                                "index": number, 
+                                "damageTaken": number, 
+                                "hpChange": number, // Optional override for healing/special
+                                "statusAdded": "string",
+                                "statusRemoved": "string"
+                            }
+                        ],
+                        "playerBuffsAdded": [
+                             { "name": "string", "effect": "string (e.g. +10 ATK)", "duration": number (turns), "description": "string", "type": "buff"|"debuff" }
+                        ],
+                        "playerBuffsRemoved": ["string (Buff Name)"],
+                        "enemyBuffsAdded": [
+                             { "enemyIndex": number, "buff": { "name": "string", "description": "string", "duration": number } }
                         ]
                     }
-                    Rules:
-                    - Calculate player damage to Target.
-                    - All surviving enemies attack the player.
-                    - Sum up damage to player.
                     `
                 },
                 {
@@ -387,7 +414,7 @@
                 const sides = parseInt(match[2]);
                 const modifier = match[3] ? parseInt(match[3]) : 0;
 
-                if (count > 50) throw new Error("骰子数量过多");
+                if (count > 100) throw new Error("骰子数量过多");
                 if (sides > 1000) throw new Error("骰子面数过多");
 
                 let total = 0;
@@ -632,6 +659,7 @@
             const [showDice, setShowDice] = useState(false);
             const [diceExpression, setDiceExpression] = useState("1d20");
             const [showInventory, setShowInventory] = useState(false);
+            const [showNarrative, setShowNarrative] = useState(true); // New Toggle
 
             const logContainerRef = useRef(null);
             const fileInputRef = useRef(null);
@@ -813,7 +841,39 @@
                             });
                         }
 
-                        return { ...prev, stats: newStats, items: newItems };
+                        // Handle New/Removed/Updated Skills
+                        let newSkillsList = prev.skills ? [...prev.skills] : [];
+                        
+                        if (result.newSkills) {
+                            result.newSkills.forEach(skill => {
+                                if (!newSkillsList.find(s => s.name === skill.name)) {
+                                    newSkillsList.push(skill);
+                                    addLog(`💡 习得新技能: ${skill.name}`, 'success');
+                                }
+                            });
+                        }
+
+                        if (result.updatedSkills) {
+                             result.updatedSkills.forEach(skill => {
+                                const idx = newSkillsList.findIndex(s => s.name === skill.name);
+                                if (idx >= 0) {
+                                    newSkillsList[idx] = skill;
+                                    addLog(`🆙 技能升级: ${skill.name}`, 'success');
+                                }
+                            });
+                        }
+
+                        if (result.removedSkills) {
+                            result.removedSkills.forEach(name => {
+                                const idx = newSkillsList.findIndex(s => s.name === name);
+                                if (idx >= 0) {
+                                    newSkillsList.splice(idx, 1);
+                                    addLog(`❌ 遗忘技能: ${name}`, 'neutral');
+                                }
+                            });
+                        }
+
+                        return { ...prev, stats: newStats, items: newItems, skills: newSkillsList };
                     });
 
                     if (result.newEnemies && result.newEnemies.length > 0) {
@@ -836,7 +896,37 @@
                 
                 // Construct action object (Skill or Custom Text)
                 let actionObj = {};
+                let costDeduced = false;
+                let tempPlayer = { ...player }; // Mutable copy for prompt generation
+
                 if (skill) {
+                    // 1. JS Logic: Check and Deduct Cost
+                    if (skill.cost > 0) {
+                        const costType = skill.costType ? skill.costType.toLowerCase() : 'mp';
+                        let statKey = 'mp'; 
+                        if (costType === 'stamina') statKey = 'stamina';
+                        if (costType === 'energy') statKey = 'mp'; 
+
+                        // Check if stat exists
+                        if (player.stats[statKey] !== undefined) {
+                            if (player.stats[statKey] < skill.cost) {
+                                addLog(`❌ ${statKey === 'mp' ? '魔法值' : '体力'}不足 (${player.stats[statKey]}/${skill.cost})，无法使用 ${skill.name}`, 'danger');
+                                return;
+                            }
+                            // Deduct immediately for UI feedback
+                            setPlayer(prev => ({
+                                ...prev,
+                                stats: {
+                                    ...prev.stats,
+                                    [statKey]: prev.stats[statKey] - skill.cost
+                                }
+                            }));
+                            costDeduced = true;
+                            // Update tempPlayer for AI context so it knows current resources
+                            tempPlayer.stats = { ...player.stats, [statKey]: player.stats[statKey] - skill.cost };
+                        }
+                    }
+
                     actionObj = { 
                         name: skill.name, 
                         type: skill.type, 
@@ -855,46 +945,130 @@
                 addLog(`> ${actionObj.name} (目标: ${enemies[selectedTargetIndex]?.name || '无'})`, 'action');
 
                 try {
-                    const messages = getCombatPrompt(player, enemies, actionObj, selectedTargetIndex, logs);
+                    const messages = getCombatPrompt(tempPlayer, enemies, actionObj, selectedTargetIndex, logs, showNarrative);
                     const result = await callAI(config, messages);
                     
                     // Update State based on AI calculation
-                    // 1. Apply damage to specific enemies
+                    
+                    // 1. Handle Enemy Updates
                     let newEnemies = [...enemies];
                     if (result.enemiesUpdates) {
                         result.enemiesUpdates.forEach(update => {
                             if (newEnemies[update.index]) {
                                 const e = newEnemies[update.index];
-                                e.stats.hp = Math.max(0, e.stats.hp - update.damageTaken);
+                                
+                                // Update HP
+                                if (update.hpChange !== undefined) {
+                                    e.stats.hp = Math.max(0, Math.min(e.stats.maxHp, e.stats.hp + update.hpChange));
+                                } else if (update.damageTaken !== undefined) {
+                                    e.stats.hp = Math.max(0, e.stats.hp - update.damageTaken);
+                                }
+
+                                // Handle Status/Buffs (Initialize if needed)
+                                if (!e.buffs) e.buffs = [];
+                                
+                                if (update.statusAdded) {
+                                    // Simple status string support for now, or expand to object
+                                    if (!e.buffs.find(b => b.name === update.statusAdded)) {
+                                        e.buffs.push({ name: update.statusAdded, duration: 3 }); // Default duration if not specified
+                                    }
+                                }
+                                if (update.statusRemoved) {
+                                    e.buffs = e.buffs.filter(b => b.name !== update.statusRemoved);
+                                }
                             }
                         });
                     }
                     
-                    // 2. Apply damage to player
-                    if (result.playerDamageTaken > 0) {
-                         setPlayer(prev => ({
-                            ...prev,
-                            stats: { ...prev.stats, hp: Math.max(0, prev.stats.hp - result.playerDamageTaken) }
-                        }));
+                    // 2. Handle Enemy Buffs (Explicit Object)
+                    if (result.enemyBuffsAdded) {
+                        result.enemyBuffsAdded.forEach(item => {
+                            if (newEnemies[item.enemyIndex]) {
+                                if (!newEnemies[item.enemyIndex].buffs) newEnemies[item.enemyIndex].buffs = [];
+                                newEnemies[item.enemyIndex].buffs.push(item.buff);
+                            }
+                        });
                     }
 
-                    addLog(result.narrative, 'combat');
+                    // 3. Handle Player Updates
+                    let playerStatUpdates = {};
+                    if (result.playerStatChanges) {
+                        playerStatUpdates = result.playerStatChanges;
+                    } else if (result.playerDamageTaken) {
+                        playerStatUpdates.hp = -result.playerDamageTaken;
+                    }
 
-                    // 3. Check for Deaths
-                    // Filter out dead enemies
+                    setPlayer(prev => {
+                        const newStats = { ...prev.stats };
+                        let newBuffs = prev.buffs ? [...prev.buffs] : [];
+
+                        // Apply Stat Changes
+                        Object.entries(playerStatUpdates).forEach(([key, value]) => {
+                            if (typeof newStats[key] !== 'undefined') {
+                                newStats[key] += value;
+                                const maxKey = "max" + key.charAt(0).toUpperCase() + key.slice(1);
+                                if (typeof newStats[maxKey] !== 'undefined') {
+                                    newStats[key] = Math.min(newStats[key], newStats[maxKey]);
+                                }
+                                newStats[key] = Math.max(0, newStats[key]); // No negative stats
+                            }
+                        });
+
+                        // Apply Buffs
+                        if (result.playerBuffsAdded) {
+                            result.playerBuffsAdded.forEach(buff => {
+                                newBuffs.push(buff);
+                                addLog(`🔼 获得状态: ${buff.name} (${buff.description})`, 'success');
+                            });
+                        }
+                        if (result.playerBuffsRemoved) {
+                            result.playerBuffsRemoved.forEach(name => {
+                                newBuffs = newBuffs.filter(b => b.name !== name);
+                                addLog(`🔽 状态消失: ${name}`, 'neutral');
+                            });
+                        }
+                        
+                        // Decrement Buff Duration (Optional: could be done by AI, but safe to do here too if AI doesn't return list)
+                        // Actually, AI instruction says "Manage Buffs... duration decreases". 
+                        // So we expect AI to tell us if something is removed. 
+                        // If AI doesn't send "updatedBuffs", we might need to decrement locally?
+                        // Let's assume AI handles removal via 'playerBuffsRemoved'. 
+                        // To be safe, maybe we should update duration if AI sends full list?
+                        // For now, trust AI to send 'playerBuffsRemoved'.
+                        
+                        return { ...prev, stats: newStats, buffs: newBuffs };
+                    });
+
+                    if (showNarrative && result.narrative) {
+                        addLog(result.narrative, 'combat');
+                    } else if (!showNarrative && result.narrative) {
+                         // Maybe log a short summary or nothing?
+                         // addLog("(Combat occurred...)", 'action');
+                    }
+
+                    // 4. Check for Deaths
                     const aliveEnemies = newEnemies.filter(e => e.stats.hp > 0);
                     setEnemies(aliveEnemies);
                     
-                    // Adjust target index if needed
                     if (selectedTargetIndex >= aliveEnemies.length) {
                         setSelectedTargetIndex(Math.max(0, aliveEnemies.length - 1));
                     }
 
+                    // Check Player Death (Estimate based on current state + updates)
+                    // Since setPlayer is async, we use the values we calculated.
+                    let currentHp = player.stats.hp;
+                    if (playerStatUpdates.hp) currentHp += playerStatUpdates.hp;
+                    
                     if (aliveEnemies.length === 0) {
-                        addLog("所有敌人已被击败！战斗结束，你可以继续冒险了。", 'success');
+                        addLog("🏆 战斗胜利！", 'success');
+                        // Clean up temporary combat buffs
+                         setPlayer(prev => ({
+                            ...prev,
+                            buffs: (prev.buffs || []).filter(b => b.duration === -1 || b.permanent) // Remove non-permanent
+                        }));
                         setPhase('adventure');
-                    } else if (player.stats.hp - result.playerDamageTaken <= 0) {
-                        addLog("你被打败了... 游戏结束。", 'danger');
+                    } else if (currentHp <= 0) {
+                        addLog("💀 你被打败了...", 'danger');
                     }
 
                 } catch (error) {
@@ -1003,6 +1177,20 @@
                                 </div>
                                 
                                 {renderStats()}
+
+                                {/* Buffs Section */}
+                                {player.buffs && player.buffs.length > 0 && (
+                                    <div className="mt-4">
+                                        <h3 className="text-xs font-bold text-purple-400 uppercase mb-2">当前状态 (Buffs)</h3>
+                                        <div className="flex flex-wrap gap-2">
+                                            {player.buffs.map((buff, i) => (
+                                                <div key={i} className="text-xs bg-blue-900/50 border border-blue-500 px-2 py-1 rounded text-blue-200 cursor-help" title={`${buff.description || buff.effect} (剩余: ${buff.duration} 回合)`}>
+                                                    {buff.name}
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
 
                                 {/* Inventory Overlay - Adjusted for sidebar */}
                                 {showInventory && (
@@ -1137,14 +1325,27 @@
                                     // Combat Controls
                                     <div className="space-y-3">
                                         <div className="flex justify-between items-center text-xs text-gray-400 uppercase tracking-wider">
-                                            <span>战斗模式 - 选择技能或输入特殊行动</span>
-                                            <button 
-                                                onClick={() => setShowDice(!showDice)}
-                                                className="text-purple-400 hover:text-purple-300 flex items-center gap-1"
-                                            >
-                                                <span>🎲 掷骰器</span>
-                                            </button>
-                                            <span>当前目标: {enemies[selectedTargetIndex]?.name || "无"}</span>
+                                            <div className="flex items-center gap-2">
+                                                <span>战斗模式</span>
+                                                <label className="flex items-center gap-1 cursor-pointer hover:text-gray-300" title="开启/关闭 AI 战斗解说">
+                                                     <input 
+                                                        type="checkbox" 
+                                                        checked={showNarrative} 
+                                                        onChange={(e) => setShowNarrative(e.target.checked)} 
+                                                        className="accent-purple-500" 
+                                                    />
+                                                     <span>解说</span>
+                                                </label>
+                                            </div>
+                                            <div className="flex gap-2 items-center">
+                                                <button 
+                                                    onClick={() => setShowDice(!showDice)}
+                                                    className="text-purple-400 hover:text-purple-300 flex items-center gap-1"
+                                                >
+                                                    <span>🎲 掷骰器</span>
+                                                </button>
+                                                <span>当前目标: {enemies[selectedTargetIndex]?.name || "无"}</span>
+                                            </div>
                                         </div>
                                         
                                         {/* Skills */}
@@ -1157,7 +1358,7 @@
                                                         onClick={() => handleCombatAction('skill', skill)}
                                                         disabled={processing || player.stats.hp <= 0}
                                                         className="flex flex-col items-start px-3 py-2 bg-red-700 hover:bg-red-600 text-white rounded shadow border-b-4 border-red-900 active:border-0 active:translate-y-1 disabled:opacity-50 disabled:translate-y-0 disabled:border-b-4 min-w-[120px]"
-                                                        title={skill.description}
+                                                        title={`${skill.name}\n类型: ${skill.type === 'active' ? '主动' : '被动'}\n消耗: ${skill.cost} ${skill.costType}\n伤害/强度: ${skill.damage}\n目标: ${skill.target}\n效果: ${skill.statusEffects ? skill.statusEffects.join(',') : '无'}\n\n${skill.description}`}
                                                     >
                                                         <span className="font-bold text-sm">{skill.name}</span>
                                                         <div className="flex gap-1 text-[10px] opacity-80 mt-1">
@@ -1173,7 +1374,7 @@
                                                 <div className="bg-gray-700/50 p-2 rounded border border-gray-600 flex flex-wrap gap-2">
                                                     <span className="text-xs text-gray-400 uppercase font-bold">被动技能:</span>
                                                     {player.skills.filter(s => s.type === 'passive').map((skill, i) => (
-                                                        <div key={i} className="text-xs bg-gray-800 px-2 py-1 rounded text-gray-300 border border-gray-700" title={skill.description}>
+                                                        <div key={i} className="text-xs bg-gray-800 px-2 py-1 rounded text-gray-300 border border-gray-700 cursor-help" title={`${skill.name}\n${skill.description}`}>
                                                             {skill.name}
                                                         </div>
                                                     ))}
@@ -1215,6 +1416,7 @@
                                             <div 
                                                 key={idx}
                                                 onClick={() => setSelectedTargetIndex(idx)}
+                                                title={`${enemy.description || ''}\n${enemy.traits ? "特性: " + enemy.traits.map(t => t.name + "(" + t.description + ")").join(", ") : ""}\n${enemy.skills ? "技能: " + enemy.skills.join(", ") : ""}`}
                                                 className={`p-2 rounded border cursor-pointer transition-colors ${
                                                     selectedTargetIndex === idx 
                                                     ? 'bg-red-900/40 border-red-500' 
@@ -1225,12 +1427,21 @@
                                                     <span className={selectedTargetIndex === idx ? "text-red-300 font-bold" : "text-gray-300"}>
                                                         {enemy.name}
                                                     </span>
-                                                    <span className="text-xs text-gray-400">HP: {enemy.stats.hp}/{enemy.stats.maxHp}</span>
+                                                    <div className="flex flex-col items-end">
+                                                        <span className="text-xs text-gray-400">HP: {Math.floor(enemy.stats.hp)}/{enemy.stats.maxHp}</span>
+                                                        {enemy.buffs && enemy.buffs.length > 0 && (
+                                                            <div className="flex gap-1 mt-1">
+                                                                {enemy.buffs.map((b, bi) => (
+                                                                    <span key={bi} className="w-2 h-2 rounded-full bg-yellow-500" title={`${b.name}: ${b.description}`}></span>
+                                                                ))}
+                                                            </div>
+                                                        )}
+                                                    </div>
                                                 </div>
                                                 <div className="w-full bg-gray-900 rounded-full h-1.5 mt-1">
                                                     <div 
                                                         className="bg-red-500 h-full rounded-full transition-all duration-500" 
-                                                        style={{ width: `${(enemy.stats.hp / enemy.stats.maxHp) * 100}%` }}
+                                                        style={{ width: `${Math.min(100, (enemy.stats.hp / enemy.stats.maxHp) * 100)}%` }}
                                                     ></div>
                                                 </div>
                                             </div>

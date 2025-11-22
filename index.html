@@ -1,0 +1,824 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI RPG Game (Multi-Model)</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- React and ReactDOM -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <!-- Babel for JSX -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #1a1a1a;
+            color: #e0e0e0;
+        }
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #2d3748; 
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #4a5568; 
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #718096; 
+        }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel" data-type="module">
+        const { useState, useEffect, useRef } = React;
+
+        // --- Configuration & Models ---
+
+        const PROVIDERS = {
+            GOOGLE: "google",
+            OPENAI: "openai",
+            DEEPSEEK: "deepseek"
+        };
+
+        const AVAILABLE_MODELS = [
+            // Google Models
+            { id: "gemini-3-pro-preview", name: "Gemini 3.0 Pro Preview (Paid)", provider: PROVIDERS.GOOGLE },
+            { id: "gemini-2.5-pro", name: "Gemini 2.5 Pro (Thinking Model)", provider: PROVIDERS.GOOGLE },
+            { id: "gemini-2.0-pro-exp", name: "Gemini 2.0 Pro Exp (If Available)", provider: PROVIDERS.GOOGLE },
+            { id: "gemini-1.5-pro", name: "Gemini 1.5 Pro (Free Tier)", provider: PROVIDERS.GOOGLE },
+            { id: "gemini-1.5-flash", name: "Gemini 1.5 Flash (Fast)", provider: PROVIDERS.GOOGLE },
+            // DeepSeek Models
+            { id: "deepseek-chat", name: "DeepSeek V3 (Chat)", provider: PROVIDERS.DEEPSEEK },
+            { id: "deepseek-reasoner", name: "DeepSeek R1 (Reasoner)", provider: PROVIDERS.DEEPSEEK },
+            // OpenAI / Compatible Models
+            { id: "gpt-4o", name: "GPT-4o", provider: PROVIDERS.OPENAI },
+            { id: "gpt-4-turbo", name: "GPT-4 Turbo", provider: PROVIDERS.OPENAI },
+            { id: "gpt-3.5-turbo", name: "GPT-3.5 Turbo", provider: PROVIDERS.OPENAI },
+            { id: "custom", name: "Custom Model ID", provider: PROVIDERS.OPENAI }
+        ];
+
+        const DEFAULT_CONFIG = {
+            provider: PROVIDERS.GOOGLE,
+            model: "gemini-1.5-pro",
+            baseUrl: "https://generativelanguage.googleapis.com", // Default Google URL
+            apiKey: ""
+        };
+
+        // --- AI Service Implementation ---
+
+        const callAI = async (config, messages, jsonMode = true) => {
+            const { provider, model, baseUrl, apiKey } = config;
+
+            try {
+                if (provider === PROVIDERS.GOOGLE) {
+                    // --- Google Gemini API ---
+                    let promptText = "";
+                    messages.forEach(msg => {
+                        promptText += `${msg.role === 'system' ? 'System Instruction' : 'User Input'}: ${msg.content}\n\n`;
+                    });
+
+                    // Use configured baseUrl (allows proxy usage)
+                    // Ensure no trailing slash
+                    const cleanBaseUrl = (baseUrl || "https://generativelanguage.googleapis.com").replace(/\/$/, "");
+                    const url = `${cleanBaseUrl}/v1beta/models/${model}:generateContent?key=${apiKey}`;
+
+                    const response = await fetch(url, {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                            contents: [{ parts: [{ text: promptText }] }],
+                            generationConfig: {
+                                responseMimeType: jsonMode ? "application/json" : "text/plain"
+                            }
+                        })
+                    });
+
+                    if (!response.ok) {
+                        const err = await response.json().catch(() => ({}));
+                        throw new Error(err.error?.message || `Google API Error: ${response.status} ${response.statusText}`);
+                    }
+
+                    const data = await response.json();
+                    if (!data.candidates || data.candidates.length === 0) throw new Error("No content generated");
+                    const content = data.candidates[0].content.parts[0].text;
+                    return jsonMode ? JSON.parse(content) : content;
+
+                } else {
+                    // --- OpenAI Compatible API (DeepSeek / OpenAI) ---
+                    let url = baseUrl.replace(/\/$/, "");
+                    if (!url.endsWith("/chat/completions")) {
+                        url += "/chat/completions";
+                    }
+
+                    const body = {
+                        model: model === 'custom' ? 'gpt-3.5-turbo' : model, 
+                        messages: messages,
+                        temperature: 0.7,
+                        response_format: jsonMode ? { type: "json_object" } : undefined
+                    };
+
+                    const response = await fetch(url, {
+                        method: "POST",
+                        headers: {
+                            "Content-Type": "application/json",
+                            "Authorization": `Bearer ${apiKey}`
+                        },
+                        body: JSON.stringify(body)
+                    });
+
+                    if (!response.ok) {
+                        const err = await response.json().catch(() => ({}));
+                        throw new Error(err.error?.message || `API Error: ${response.status}`);
+                    }
+
+                    const data = await response.json();
+                    const content = data.choices[0].message.content;
+                    return jsonMode ? JSON.parse(content) : content;
+                }
+            } catch (error) {
+                console.error("AI Service Error:", error);
+                throw error;
+            }
+        };
+
+        // --- Prompts (Unchanged) ---
+
+        const getCharGenPrompt = (worldview, description) => {
+            return [
+                {
+                    role: "system",
+                    content: `You are a creative RPG Game Master. Create a character based on the user's input.
+                    IMPORTANT: All user-facing strings (name, class, skills description, story) MUST be in Simplified Chinese (简体中文).
+                    
+                    Return ONLY valid JSON matching this structure:
+                    {
+                        "name": "string (Chinese Name)",
+                        "class": "string (Chinese Class)",
+                        "stats": { 
+                            "hp": number (50-200), 
+                            "maxHp": number (same as hp), 
+                            "mp": number (optional, 0-100), 
+                            "maxMp": number (optional, same as mp),
+                            "stamina": number (optional, 0-100),
+                            "maxStamina": number (optional, same as stamina),
+                            "attack": number (10-30), 
+                            "defense": number (5-20), 
+                            "speed": number (5-20) 
+                            // Add other relevant stats based on description (e.g. 'energy', 'sanity')
+                        },
+                        "skills": [
+                            { "name": "string (Chinese Skill Name)", "damage": number (10-50), "cost": number (0-30), "costType": "mp"|"stamina"|"energy", "type": "attack"|"magic"|"support", "description": "string (Chinese)" }
+                        ],
+                        "story": "string (Short backstory in Chinese, max 2 sentences)"
+                    }
+                    Create 3 skills. Ensure resource costs (MP/Stamina) match the stats provided.`
+                },
+                {
+                    role: "user",
+                    content: `World Setting: ${worldview}\nCharacter Description: ${description}`
+                }
+            ];
+        };
+
+        // Prompt for Adventure Phase (Exploration)
+        const getAdventurePrompt = (player, history, action) => {
+             const lastLog = history.length > 0 ? history[history.length - 1].text : "";
+             return [
+                {
+                    role: "system",
+                    content: `You are an RPG Game Master (DM). The player is exploring the world.
+                    Current Player: ${player.name} (${player.class}).
+                    Stats: ${JSON.stringify(player.stats)}.
+                    
+                    The user performs an action. Describe the outcome.
+                    Allow the user to heal, rest, or use items to restore stats (HP, MP, etc.) if the action implies it.
+                    
+                    IMPORTANT: Narrative MUST be in Simplified Chinese (简体中文).
+                    
+                    Return ONLY valid JSON:
+                    {
+                        "narrative": "string (Description of what happens)",
+                        "statChanges": { "hp": number, "mp": number, ... }, // Optional: Relative changes to stats (e.g. {"hp": 20, "mp": -5})
+                        "newEnemies": [ // Optional: Only if combat starts
+                            { "name": "string", "stats": { "hp": number, "maxHp": number, "attack": number, "defense": number, "speed": number } }
+                        ]
+                    }
+                    `
+                },
+                {
+                    role: "user",
+                    content: `Previous: ${lastLog}\nPlayer Action: ${action}`
+                }
+            ];
+        };
+
+        // Prompt for Combat Phase (Multi-Enemy)
+        const getCombatPrompt = (player, enemies, action, targetIndex, history) => {
+            const lastLog = history.length > 0 ? history[history.length - 1].text : "";
+            
+            // Construct enemy state string
+            const enemyState = enemies.map((e, i) => `[${i}] ${e.name}: HP ${e.stats.hp}/${e.stats.maxHp}`).join(", ");
+
+            return [
+                {
+                    role: "system",
+                    content: `You are an RPG Combat Narrator. 
+                    The player is fighting ${enemies.length} enemies.
+                    
+                    Player: HP ${player.stats.hp}/${player.stats.maxHp}, ATK ${player.stats.attack}, DEF ${player.stats.defense}
+                    Enemies: ${enemyState}
+                    
+                    Action: ${JSON.stringify(action)}
+                    Target Index: ${targetIndex} (The enemy being attacked by player)
+                    
+                    IMPORTANT: Narrative MUST be in Simplified Chinese (简体中文).
+                    
+                    Return ONLY valid JSON:
+                    {
+                        "narrative": "string (Describe player's attack AND all enemies' counter-attacks)",
+                        "playerDamageTaken": number (Total damage player took from ALL enemies this turn),
+                        "enemiesUpdates": [
+                            { "index": number, "damageTaken": number } // Damage taken by specific enemies (usually the target)
+                        ]
+                    }
+                    Rules:
+                    - Calculate player damage to Target.
+                    - All surviving enemies attack the player.
+                    - Sum up damage to player.
+                    `
+                },
+                {
+                    role: "user",
+                    content: `Execute Combat Turn.`
+                }
+            ];
+        };
+
+        // --- Components ---
+
+        function ConfigScreen({ onConnect }) {
+            const [config, setConfig] = useState(() => {
+                const saved = localStorage.getItem("ai_rpg_config");
+                return saved ? JSON.parse(saved) : DEFAULT_CONFIG;
+            });
+            
+            const [customModel, setCustomModel] = useState("");
+
+            useEffect(() => {
+                localStorage.setItem("ai_rpg_config", JSON.stringify(config));
+            }, [config]);
+
+            const handleSubmit = (e) => {
+                e.preventDefault();
+                if (config.apiKey.trim().length > 0) {
+                    const finalConfig = { ...config };
+                    if (config.model === 'custom') {
+                        finalConfig.model = customModel;
+                    }
+                    onConnect(finalConfig);
+                }
+            };
+
+            const handleProviderChange = (newProvider) => {
+                let newBaseUrl = "";
+                if (newProvider === PROVIDERS.GOOGLE) newBaseUrl = "https://generativelanguage.googleapis.com";
+                else if (newProvider === PROVIDERS.DEEPSEEK) newBaseUrl = "https://api.deepseek.com";
+                else newBaseUrl = "https://api.openai.com/v1";
+
+                setConfig(prev => ({
+                    ...prev,
+                    provider: newProvider,
+                    // Default to first model of that provider
+                    model: AVAILABLE_MODELS.find(m => m.provider === newProvider)?.id || 'custom',
+                    baseUrl: newBaseUrl
+                }));
+            };
+
+            return (
+                <div className="flex flex-col items-center justify-center min-h-screen p-4 bg-gray-900 text-gray-200">
+                    <div className="bg-gray-800 p-8 rounded-lg shadow-lg max-w-md w-full border border-gray-700 space-y-6">
+                        <div>
+                            <h1 className="text-2xl font-bold text-center text-purple-400">游戏设置 (Game Config)</h1>
+                            <p className="text-center text-xs text-gray-500 mt-1">选择你的 AI 引擎</p>
+                        </div>
+
+                        <form onSubmit={handleSubmit} className="space-y-4">
+                            {/* Provider Selection */}
+                            <div>
+                                <label className="block text-sm font-medium mb-1 text-gray-400">AI 提供商 (Provider)</label>
+                                <div className="flex gap-2">
+                                    <button
+                                        type="button"
+                                        onClick={() => handleProviderChange(PROVIDERS.GOOGLE)}
+                                        className={`flex-1 py-2 rounded border ${config.provider === PROVIDERS.GOOGLE ? 'bg-purple-600 border-purple-500 text-white' : 'bg-gray-700 border-gray-600 text-gray-400 hover:bg-gray-600'}`}
+                                    >
+                                        Google
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => handleProviderChange(PROVIDERS.DEEPSEEK)}
+                                        className={`flex-1 py-2 rounded border ${config.provider === PROVIDERS.DEEPSEEK ? 'bg-blue-600 border-blue-500 text-white' : 'bg-gray-700 border-gray-600 text-gray-400 hover:bg-gray-600'}`}
+                                    >
+                                        DeepSeek
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => handleProviderChange(PROVIDERS.OPENAI)}
+                                        className={`flex-1 py-2 rounded border ${config.provider === PROVIDERS.OPENAI ? 'bg-green-600 border-green-500 text-white' : 'bg-gray-700 border-gray-600 text-gray-400 hover:bg-gray-600'}`}
+                                    >
+                                        OpenAI
+                                    </button>
+                                </div>
+                            </div>
+
+                            {/* Model Selection */}
+                            <div>
+                                <label className="block text-sm font-medium mb-1 text-gray-400">模型 (Model)</label>
+                                <select
+                                    value={config.model}
+                                    onChange={(e) => setConfig({...config, model: e.target.value})}
+                                    className="w-full p-2 rounded bg-gray-700 border border-gray-600 focus:border-purple-500 focus:outline-none text-white"
+                                >
+                                    {AVAILABLE_MODELS.filter(m => m.provider === config.provider).map(m => (
+                                        <option key={m.id} value={m.id}>{m.name}</option>
+                                    ))}
+                                    {config.provider === PROVIDERS.OPENAI && <option value="custom">自定义 / 其他...</option>}
+                                </select>
+                            </div>
+
+                            {/* Custom Model Input (Only if custom selected) */}
+                            {config.model === 'custom' && (
+                                <div>
+                                    <label className="block text-sm font-medium mb-1 text-gray-400">自定义模型 ID</label>
+                                    <input
+                                        type="text"
+                                        value={customModel}
+                                        onChange={(e) => setCustomModel(e.target.value)}
+                                        className="w-full p-2 rounded bg-gray-700 border border-gray-600 focus:border-purple-500 focus:outline-none text-white"
+                                        placeholder="例如：claude-3-opus..."
+                                        required
+                                    />
+                                </div>
+                            )}
+
+                            {/* API Key */}
+                            <div>
+                                <label className="block text-sm font-medium mb-1 text-gray-400">API 密钥 (Key)</label>
+                                <input 
+                                    type="password" 
+                                    value={config.apiKey}
+                                    onChange={(e) => setConfig({...config, apiKey: e.target.value})}
+                                    className="w-full p-2 rounded bg-gray-700 border border-gray-600 focus:border-purple-500 focus:outline-none text-white"
+                                    placeholder={config.provider === PROVIDERS.GOOGLE ? "AIza..." : "sk-..."}
+                                    required
+                                />
+                            </div>
+
+                            <button 
+                                type="submit" 
+                                className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded transition duration-200 mt-4"
+                            >
+                                连接并开始 (Connect)
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            );
+        }
+
+        function CharacterCreation({ onCharacterCreated, config }) {
+            const [worldview, setWorldview] = useState("赛博朋克");
+            const [description, setDescription] = useState("一个拥有机械臂的流浪黑客。");
+            const [loading, setLoading] = useState(false);
+
+            const handleSubmit = async (e) => {
+                e.preventDefault();
+                setLoading(true);
+                try {
+                    const messages = getCharGenPrompt(worldview, description);
+                    const charData = await callAI(config, messages);
+                    onCharacterCreated(charData);
+                } catch (error) {
+                    alert("生成角色失败: " + error.message);
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            return (
+                <div className="flex flex-col items-center justify-center min-h-screen p-4">
+                    <div className="bg-gray-800 p-8 rounded-lg shadow-lg max-w-md w-full border border-gray-700">
+                        <h1 className="text-3xl font-bold mb-6 text-center text-purple-400">AI RPG 生成器</h1>
+                        <form onSubmit={handleSubmit} className="space-y-4">
+                            <div>
+                                <label className="block text-sm font-medium mb-1 text-gray-300">世界观设定</label>
+                                <input 
+                                    type="text" 
+                                    value={worldview}
+                                    onChange={(e) => setWorldview(e.target.value)}
+                                    className="w-full p-2 rounded bg-gray-700 border border-gray-600 focus:border-purple-500 focus:outline-none text-white"
+                                    placeholder="例如：赛博朋克 2077，高魔奇幻..."
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium mb-1 text-gray-300">角色描述</label>
+                                <textarea 
+                                    value={description}
+                                    onChange={(e) => setDescription(e.target.value)}
+                                    className="w-full p-2 rounded bg-gray-700 border border-gray-600 focus:border-purple-500 focus:outline-none text-white h-32"
+                                    placeholder="描述你的英雄..."
+                                />
+                            </div>
+                            <button 
+                                type="submit" 
+                                disabled={loading}
+                                className="w-full bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded transition duration-200 disabled:opacity-50 flex justify-center items-center gap-2"
+                            >
+                                {loading ? "正在构思..." : "开始冒险"}
+                            </button>
+                        </form>
+                        <div className="text-center mt-4 text-xs text-gray-500">
+                            运行模型：{config.model}
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        function GameInterface({ character, config }) {
+            const [player, setPlayer] = useState(character);
+            // Phase: 'adventure' (Exploration) or 'combat'
+            const [phase, setPhase] = useState('adventure'); 
+            
+            const [enemies, setEnemies] = useState([]);
+            const [selectedTargetIndex, setSelectedTargetIndex] = useState(0);
+            
+            const [logs, setLogs] = useState([
+                { text: character.story, type: 'narrative' },
+                { text: "冒险开始了。你可以输入行动来探索这个世界。", type: 'narrative' }
+            ]);
+            
+            const [inputAction, setInputAction] = useState("");
+            const [processing, setProcessing] = useState(false);
+
+            const logContainerRef = useRef(null);
+
+            useEffect(() => {
+                if (logContainerRef.current) {
+                    logContainerRef.current.scrollTop = logContainerRef.current.scrollHeight;
+                }
+            }, [logs]);
+
+            const addLog = (text, type = 'neutral') => {
+                setLogs(prev => [...prev, { text, type }]);
+            };
+
+            // --- Adventure Phase Handler ---
+            const handleAdventureAction = async () => {
+                if (processing || !inputAction.trim()) return;
+                const action = inputAction.trim();
+                setInputAction("");
+                setProcessing(true);
+                addLog(`> ${action}`, 'action');
+
+                try {
+                    const messages = getAdventurePrompt(player, logs, action);
+                    const result = await callAI(config, messages);
+                    
+                    addLog(result.narrative, 'narrative');
+
+                    // Handle Stat Changes (Healing/Items)
+                    if (result.statChanges) {
+                        setPlayer(prev => {
+                            const newStats = { ...prev.stats };
+                            Object.entries(result.statChanges).forEach(([key, value]) => {
+                                if (typeof newStats[key] !== 'undefined') {
+                                    newStats[key] = newStats[key] + value;
+                                    // Cap at max if max exists (e.g. hp -> maxHp, mp -> maxMp)
+                                    // Heuristic: maxKey is "max" + TitleCase(key)
+                                    const maxKey = "max" + key.charAt(0).toUpperCase() + key.slice(1);
+                                    if (typeof newStats[maxKey] !== 'undefined') {
+                                        newStats[key] = Math.min(newStats[key], newStats[maxKey]);
+                                    }
+                                    newStats[key] = Math.max(0, newStats[key]); // Min 0
+                                }
+                            });
+                            return { ...prev, stats: newStats };
+                        });
+                    }
+
+                    if (result.newEnemies && result.newEnemies.length > 0) {
+                        setEnemies(result.newEnemies);
+                        setPhase('combat');
+                        setSelectedTargetIndex(0);
+                        addLog(`⚠️ 遭遇敌袭！出现 ${result.newEnemies.length} 个敌人！`, 'danger');
+                    }
+
+                } catch (error) {
+                    addLog(`错误: ${error.message}`, 'danger');
+                } finally {
+                    setProcessing(false);
+                }
+            };
+
+            // --- Combat Phase Handler ---
+            const handleCombatAction = async (actionType, skill = null) => {
+                if (processing || player.stats.hp <= 0) return;
+                
+                // Construct action object (Skill or Custom Text)
+                let actionObj = {};
+                if (skill) {
+                    actionObj = { name: skill.name, type: skill.type, damage: skill.damage, cost: skill.cost };
+                } else {
+                    if (!inputAction.trim()) return;
+                    actionObj = { name: inputAction.trim(), type: 'custom' };
+                    setInputAction("");
+                }
+
+                setProcessing(true);
+                addLog(`> ${actionObj.name} (目标: ${enemies[selectedTargetIndex]?.name || '无'})`, 'action');
+
+                try {
+                    const messages = getCombatPrompt(player, enemies, actionObj, selectedTargetIndex, logs);
+                    const result = await callAI(config, messages);
+                    
+                    // Update State based on AI calculation
+                    // 1. Apply damage to specific enemies
+                    let newEnemies = [...enemies];
+                    if (result.enemiesUpdates) {
+                        result.enemiesUpdates.forEach(update => {
+                            if (newEnemies[update.index]) {
+                                const e = newEnemies[update.index];
+                                e.stats.hp = Math.max(0, e.stats.hp - update.damageTaken);
+                            }
+                        });
+                    }
+                    
+                    // 2. Apply damage to player
+                    if (result.playerDamageTaken > 0) {
+                         setPlayer(prev => ({
+                            ...prev,
+                            stats: { ...prev.stats, hp: Math.max(0, prev.stats.hp - result.playerDamageTaken) }
+                        }));
+                    }
+
+                    addLog(result.narrative, 'combat');
+
+                    // 3. Check for Deaths
+                    // Filter out dead enemies
+                    const aliveEnemies = newEnemies.filter(e => e.stats.hp > 0);
+                    setEnemies(aliveEnemies);
+                    
+                    // Adjust target index if needed
+                    if (selectedTargetIndex >= aliveEnemies.length) {
+                        setSelectedTargetIndex(Math.max(0, aliveEnemies.length - 1));
+                    }
+
+                    if (aliveEnemies.length === 0) {
+                        addLog("所有敌人已被击败！战斗结束，你可以继续冒险了。", 'success');
+                        setPhase('adventure');
+                    } else if (player.stats.hp - result.playerDamageTaken <= 0) {
+                        addLog("你被打败了... 游戏结束。", 'danger');
+                    }
+
+                } catch (error) {
+                    addLog(`错误: ${error.message}`, 'danger');
+                } finally {
+                    setProcessing(false);
+                }
+            };
+
+            // Helper to render dynamic status bars
+            const renderStats = () => {
+                const statKeys = Object.keys(player.stats);
+                // Find "bar" stats: keys that have a corresponding "maxKey" (e.g. hp/maxHp, mp/maxMp)
+                const barStats = [];
+                const otherStats = [];
+
+                statKeys.forEach(key => {
+                    if (key.startsWith('max')) return; // Skip max keys
+                    const maxKey = "max" + key.charAt(0).toUpperCase() + key.slice(1);
+                    if (player.stats[maxKey] !== undefined) {
+                        barStats.push({ key, maxKey, label: key.toUpperCase() });
+                    } else {
+                        otherStats.push({ key, label: key.toUpperCase() });
+                    }
+                });
+
+                return (
+                    <>
+                        {/* Bars */}
+                        {barStats.map(stat => (
+                            <div key={stat.key} className="mb-2">
+                                <div className="flex justify-between text-xs uppercase text-gray-400 mb-1">
+                                    <span>{stat.key}</span>
+                                    <span>{Math.floor(player.stats[stat.key])}/{player.stats[stat.maxKey]}</span>
+                                </div>
+                                <div className="w-full bg-gray-700 rounded-full h-3 overflow-hidden">
+                                    <div 
+                                        className={`h-full transition-all duration-500 ${
+                                            stat.key === 'hp' ? 'bg-green-500' : 
+                                            stat.key === 'mp' ? 'bg-blue-500' : 
+                                            stat.key === 'stamina' ? 'bg-yellow-500' : 'bg-purple-500'
+                                        }`} 
+                                        style={{ width: `${Math.min(100, Math.max(0, (player.stats[stat.key] / player.stats[stat.maxKey]) * 100))}%` }}
+                                    ></div>
+                                </div>
+                            </div>
+                        ))}
+                        
+                        {/* Grid for other stats */}
+                        <div className="grid grid-cols-3 gap-2 mt-3 text-sm text-gray-400">
+                            {otherStats.map(stat => (
+                                <div key={stat.key} className="flex flex-col items-center bg-gray-700/30 rounded p-1">
+                                    <span className="text-xs text-gray-500 uppercase">{stat.key}</span>
+                                    <span className="font-bold text-gray-200">{player.stats[stat.key]}</span>
+                                </div>
+                            ))}
+                        </div>
+                    </>
+                );
+            };
+
+            return (
+                <div className="flex flex-col h-screen max-w-5xl mx-auto p-2 md:p-4">
+                    {/* Header Stats */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                        {/* Player Card */}
+                        <div className="bg-gray-800 p-4 rounded border border-gray-600">
+                            <div className="flex justify-between items-center mb-3">
+                                <h2 className="text-xl font-bold text-purple-400">{player.name}</h2>
+                                <span className="text-xs bg-gray-700 px-2 py-1 rounded text-gray-300">{player.class}</span>
+                            </div>
+                            
+                            {renderStats()}
+                        </div>
+
+                        {/* Enemy List (Only in Combat) */}
+                        {phase === 'combat' && (
+                            <div className="bg-gray-800 p-4 rounded border border-gray-600 overflow-y-auto max-h-40">
+                                <h3 className="text-sm font-bold text-red-400 mb-2 sticky top-0 bg-gray-800">敌人列表 (点击选择目标)</h3>
+                                <div className="space-y-2">
+                                    {enemies.map((enemy, idx) => (
+                                        <div 
+                                            key={idx}
+                                            onClick={() => setSelectedTargetIndex(idx)}
+                                            className={`p-2 rounded border cursor-pointer transition-colors ${
+                                                selectedTargetIndex === idx 
+                                                ? 'bg-red-900/40 border-red-500' 
+                                                : 'bg-gray-700/50 border-transparent hover:bg-gray-700'
+                                            }`}
+                                        >
+                                            <div className="flex justify-between items-center">
+                                                <span className={selectedTargetIndex === idx ? "text-red-300 font-bold" : "text-gray-300"}>
+                                                    {enemy.name}
+                                                </span>
+                                                <span className="text-xs text-gray-400">HP: {enemy.stats.hp}/{enemy.stats.maxHp}</span>
+                                            </div>
+                                            <div className="w-full bg-gray-900 rounded-full h-1.5 mt-1">
+                                                <div 
+                                                    className="bg-red-500 h-full rounded-full transition-all duration-500" 
+                                                    style={{ width: `${(enemy.stats.hp / enemy.stats.maxHp) * 100}%` }}
+                                                ></div>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+                    </div>
+
+                    {/* Main Game Area */}
+                    <div className="flex-1 flex flex-col gap-4 overflow-hidden">
+                        {/* Log/Narrative Area */}
+                        <div 
+                            ref={logContainerRef}
+                            className="flex-1 bg-gray-900 p-4 rounded border border-gray-700 overflow-y-auto space-y-2 font-mono text-sm md:text-base shadow-inner"
+                        >
+                            {logs.map((log, i) => (
+                                <div key={i} className={`p-2 rounded leading-relaxed ${
+                                    log.type === 'narrative' ? 'bg-gray-800 text-yellow-100 border-l-2 border-yellow-600' :
+                                    log.type === 'combat' ? 'bg-red-900/20 text-red-100 border-l-2 border-red-600' :
+                                    log.type === 'action' ? 'bg-gray-700/50 text-gray-300 text-right italic' :
+                                    log.type === 'success' ? 'bg-green-900/30 text-green-200 border-l-2 border-green-500' :
+                                    log.type === 'danger' ? 'bg-red-600 text-white font-bold text-center' :
+                                    'text-gray-300'
+                                }`}>
+                                    {log.text}
+                                </div>
+                            ))}
+                            {processing && (
+                                <div className="flex items-center gap-2 text-gray-400 italic p-2">
+                                    <span className="animate-spin">✦</span> AI 正在生成...
+                                </div>
+                            )}
+                        </div>
+
+                        {/* Input / Controls Area */}
+                        <div className="bg-gray-800 p-4 rounded border border-gray-600 shadow-lg z-10">
+                            {phase === 'adventure' ? (
+                                // Adventure Controls
+                                <div className="flex gap-2">
+                                    <input
+                                        type="text"
+                                        value={inputAction}
+                                        onChange={(e) => setInputAction(e.target.value)}
+                                        onKeyDown={(e) => e.key === 'Enter' && handleAdventureAction()}
+                                        placeholder="输入你的行动 (例如: 向北探索，寻找水源，调查神庙...)"
+                                        className="flex-1 p-3 rounded bg-gray-700 border border-gray-600 focus:border-purple-500 focus:outline-none text-white"
+                                        disabled={processing}
+                                    />
+                                    <button
+                                        onClick={handleAdventureAction}
+                                        disabled={processing || !inputAction.trim()}
+                                        className="px-6 bg-purple-600 hover:bg-purple-500 text-white font-bold rounded shadow disabled:opacity-50"
+                                    >
+                                        行动
+                                    </button>
+                                </div>
+                            ) : (
+                                // Combat Controls
+                                <div className="space-y-3">
+                                    <div className="flex justify-between items-center text-xs text-gray-400 uppercase tracking-wider">
+                                        <span>战斗模式 - 选择技能或输入特殊行动</span>
+                                        <span>当前目标: {enemies[selectedTargetIndex]?.name || "无"}</span>
+                                    </div>
+                                    
+                                    {/* Skills */}
+                                    <div className="flex gap-2 flex-wrap">
+                                        {player.skills.map((skill, i) => (
+                                            <button
+                                                key={i}
+                                                onClick={() => handleCombatAction('skill', skill)}
+                                                disabled={processing || player.stats.hp <= 0}
+                                                className="px-4 py-2 bg-red-700 hover:bg-red-600 text-white rounded shadow border-b-4 border-red-900 active:border-0 active:translate-y-1 disabled:opacity-50 disabled:translate-y-0 disabled:border-b-4"
+                                                title={skill.description}
+                                            >
+                                                {skill.name} <span className="opacity-75 text-xs">({skill.cost ? `${skill.cost}MP` : ''})</span>
+                                            </button>
+                                        ))}
+                                    </div>
+
+                                    {/* Custom Combat Action */}
+                                    <div className="flex gap-2">
+                                        <input
+                                            type="text"
+                                            value={inputAction}
+                                            onChange={(e) => setInputAction(e.target.value)}
+                                            onKeyDown={(e) => e.key === 'Enter' && handleCombatAction('custom')}
+                                            placeholder="尝试特殊战斗行动 (例如: 寻找掩体，投掷沙石...)"
+                                            className="flex-1 p-2 rounded bg-gray-700 border border-gray-600 focus:border-red-500 focus:outline-none text-white text-sm"
+                                            disabled={processing}
+                                        />
+                                        <button
+                                            onClick={() => handleCombatAction('custom')}
+                                            disabled={processing || !inputAction.trim()}
+                                            className="px-4 bg-gray-600 hover:bg-gray-500 text-white text-sm font-bold rounded disabled:opacity-50"
+                                        >
+                                            执行
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        function App() {
+            const [gameConfig, setGameConfig] = useState(null);
+            const [character, setCharacter] = useState(null);
+
+            const handleConnect = (config) => {
+                setGameConfig(config);
+            };
+
+            if (!gameConfig) {
+                return <ConfigScreen onConnect={handleConnect} />;
+            }
+
+            return (
+                <>
+                    {!character ? (
+                        <CharacterCreation onCharacterCreated={setCharacter} config={gameConfig} />
+                    ) : (
+                        <GameInterface character={character} config={gameConfig} />
+                    )}
+                </>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>

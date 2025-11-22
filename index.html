@@ -214,30 +214,29 @@
                 {
                     role: "system",
                     content: `你是一位富有创造力的 RPG 游戏主持人 (GM)。请根据用户的输入创建一个角色。
-                    重要提示：所有面向用户的文本（姓名、职业、技能描述、故事）必须使用简体中文。
                     
                     仅返回符合此结构的有效 JSON：
                     {
-                        "name": "string (中文名)",
-                        "class": "string (中文职业名)",
+                        "name": "string",
+                        "class": "string",
                         "stats": { 
-                            "hp": number (50-1000), 
+                            "hp": number (生命值。参考：普通成年男性约为 100，英雄人物可更高), 
                             "maxHp": number (同 hp), 
-                            "mp": number (0-1000), 
+                            "mp": number (魔法/能量值。参考：无魔法普通人为 0，初级法师约为 100), 
                             "maxMp": number (同 mp),
-                            "stamina": number (0-100),
+                            "stamina": number (体力。参考：普通人约为 100),
                             "maxStamina": number (同 stamina),
-                            "attack": number (10-100), 
-                            "defense": number (0-50), 
-                            "speed": number (5-50) 
+                            "attack": number (攻击力。参考：普通人徒手约为 10，持武器可更高), 
+                            "defense": number (防御力。参考：普通人约为 0，轻甲约为 5), 
+                            "speed": number (速度。参考：普通人约为 10) 
                             // 根据描述添加其他相关属性
                         },
                         "skills": [
                             { 
                                 "name": "string (中文技能名)", 
                                 "type": "active"|"passive", 
-                                "damage": number (0-100, 被动/增益技能为0), 
-                                "cost": number (0-50), 
+                                "damage": number (0-100+, 被动/增益技能为0), 
+                                "cost": number (0-100+), 
                                 "costType": "mp"|"stamina"|"energy"|"none", 
                                 "target": "single"|"aoe"|"self"|"all_enemies", 
                                 "statusEffects": ["string (如 'burn', 'freeze', 'poison', 'stun', 'disarm', 'bind')"],
@@ -255,7 +254,7 @@
                     - 包含多样化的机制：伤害、治疗、增益 (Buffs)、减益 (Debuffs)。
                     - 如果合适，包含 1-2 个被动技能。
                     - 给角色 3-5 个初始物品（例如：生命药水、口粮、地图、武器）。
-                    - 确保资源消耗与提供的属性相匹配。`
+                    - **数值设定原则**：请根据角色的背景描述（如种族、职业、经历）来合理设定数值，不要受限于固定范围。如果是强大的英雄，数值可以远超普通人标准。`
                 },
                 {
                     role: "user",

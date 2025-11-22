@@ -846,14 +846,18 @@
                     // 1. JS Logic: Check and Deduct Cost
                     if (skill.cost > 0) {
                         const costType = skill.costType ? skill.costType.toLowerCase() : 'mp';
-                        let statKey = 'mp'; 
-                        if (costType === 'stamina') statKey = 'stamina';
-                        if (costType === 'energy') statKey = 'mp'; 
+                        let statKey = costType;
+
+                        // Smart Stat Mapping: Try to find the correct stat key
+                        if (player.stats[statKey] === undefined) {
+                            if ((costType === 'energy' || costType === 'mana') && player.stats.mp !== undefined) statKey = 'mp';
+                            else if ((costType === 'mp' || costType === 'mana') && player.stats.energy !== undefined) statKey = 'energy';
+                        }
 
                         // Check if stat exists
                         if (player.stats[statKey] !== undefined) {
                             if (player.stats[statKey] < skill.cost) {
-                                addLog(`❌ ${statKey === 'mp' ? '魔法值' : '体力'}不足 (${player.stats[statKey]}/${skill.cost})，无法使用 ${skill.name}`, 'danger');
+                                addLog(`❌ ${statKey.toUpperCase()}不足 (${Math.floor(player.stats[statKey])}/${skill.cost})，无法使用 ${skill.name}`, 'danger');
                                 return;
                             }
                             // Deduct immediately for UI feedback
@@ -864,8 +868,12 @@
                                     [statKey]: prev.stats[statKey] - skill.cost
                                 }
                             }));
+                            costDeduced = true;
                             // Update tempPlayer for AI context so it knows current resources
                             tempPlayer.stats = { ...player.stats, [statKey]: player.stats[statKey] - skill.cost };
+                        } else {
+                            // Stat not found, maybe log warning or just ignore cost?
+                            console.warn(`Cannot deduct cost: ${costType} (mapped to ${statKey}) not found in player stats.`);
                         }
                     }
 

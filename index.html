@@ -201,6 +201,12 @@
                     The user performs an action. Describe the outcome.
                     Allow the user to heal, rest, or use items to restore stats (HP, MP, etc.) if the action implies it.
                     
+                    IF THE USER INPUT CONTAINS A DICE ROLL (e.g. "(🎲 1d20: 15)"):
+                    - Respect the result.
+                    - If high (e.g. > 10 for d20), the action succeeds better.
+                    - If low (e.g. < 5 for d20), the action might fail or have consequences.
+                    - Mention the roll result in the narrative (e.g. "你掷出了15点，轻松跳过了陷阱").
+
                     IMPORTANT: Narrative MUST be in Simplified Chinese (简体中文).
                     
                     Return ONLY valid JSON:
@@ -239,6 +245,11 @@
                     Action: ${JSON.stringify(action)}
                     Target Index: ${targetIndex} (The enemy being attacked by player)
                     
+                    IF THE USER ACTION CONTAINS A DICE ROLL (e.g. "(🎲 1d20: 20)"):
+                    - Use it to determine hit/crit/miss if applicable.
+                    - High rolls (e.g. near max) should be critical hits or special effects.
+                    - Low rolls might miss.
+
                     IMPORTANT: Narrative MUST be in Simplified Chinese (简体中文).
                     
                     Return ONLY valid JSON:
@@ -260,6 +271,44 @@
                     content: `Execute Combat Turn.`
                 }
             ];
+        };
+
+        // --- Helper Functions ---
+        
+        const rollDice = (expression) => {
+            try {
+                // Simple parser for XdY+Z format
+                const regex = /^(\d+)d(\d+)(?:\+([-]?\d+))?$/i;
+                const match = expression.trim().match(regex);
+                
+                if (!match) {
+                    // Try parsing just a number
+                    const num = parseInt(expression);
+                    if (!isNaN(num)) return { total: num, details: `${num}`, expression };
+                    throw new Error("无效的表达式。格式示例: 2d6, 1d20+5");
+                }
+
+                const count = parseInt(match[1]);
+                const sides = parseInt(match[2]);
+                const modifier = match[3] ? parseInt(match[3]) : 0;
+
+                if (count > 50) throw new Error("骰子数量过多");
+                if (sides > 1000) throw new Error("骰子面数过多");
+
+                let total = 0;
+                const rolls = [];
+                for (let i = 0; i < count; i++) {
+                    const roll = Math.floor(Math.random() * sides) + 1;
+                    rolls.push(roll);
+                    total += roll;
+                }
+                total += modifier;
+
+                const details = `[${rolls.join(",")}]${modifier !== 0 ? (modifier > 0 ? `+${modifier}` : modifier) : ""} = ${total}`;
+                return { total, details, expression };
+            } catch (e) {
+                return { error: e.message };
+            }
         };
 
         // --- Components ---
@@ -468,6 +517,8 @@
             
             const [inputAction, setInputAction] = useState("");
             const [processing, setProcessing] = useState(false);
+            const [showDice, setShowDice] = useState(false);
+            const [diceExpression, setDiceExpression] = useState("1d20");
 
             const logContainerRef = useRef(null);
             const fileInputRef = useRef(null);
@@ -538,6 +589,19 @@
 
             const addLog = (text, type = 'neutral') => {
                 setLogs(prev => [...prev, { text, type }]);
+            };
+
+            const handleRollDice = (e) => {
+                e.preventDefault(); // Prevent form submission if inside a form
+                const result = rollDice(diceExpression);
+                if (result.error) {
+                    addLog(`🎲 掷骰错误: ${result.error}`, 'danger');
+                } else {
+                    const rollText = `(🎲 ${result.expression}: ${result.details})`;
+                    setInputAction(prev => (prev ? prev + " " + rollText : rollText));
+                    addLog(`🎲 掷骰检定: ${result.expression} => ${result.details}`, 'action');
+                    setShowDice(false);
+                }
             };
 
             // --- Adventure Phase Handler ---
@@ -785,8 +849,47 @@
                         {/* Log/Narrative Area */}
                         <div 
                             ref={logContainerRef}
-                            className="flex-1 bg-gray-900 p-4 rounded border border-gray-700 overflow-y-auto space-y-2 font-mono text-sm md:text-base shadow-inner"
+                            className="flex-1 bg-gray-900 p-4 rounded border border-gray-700 overflow-y-auto space-y-2 font-mono text-sm md:text-base shadow-inner relative"
                         >
+                            {/* Dice Overlay */}
+                            {showDice && (
+                                <div className="absolute bottom-4 right-4 bg-gray-800 p-3 rounded border border-purple-500 shadow-xl z-20 flex flex-col gap-2 animate-in fade-in slide-in-from-bottom-2">
+                                    <span className="text-xs text-purple-300 font-bold">掷骰子 (Dice Roller)</span>
+                                    <div className="flex gap-2">
+                                        <input 
+                                            type="text" 
+                                            value={diceExpression}
+                                            onChange={(e) => setDiceExpression(e.target.value)}
+                                            className="w-24 p-1 text-sm rounded bg-gray-700 border border-gray-600 text-white"
+                                            placeholder="1d20"
+                                        />
+                                        <button 
+                                            onClick={handleRollDice}
+                                            className="bg-purple-600 hover:bg-purple-500 text-white px-3 py-1 rounded text-sm font-bold"
+                                        >
+                                            Roll
+                                        </button>
+                                    </div>
+                                    <div className="flex gap-1 justify-between">
+                                        {["1d20", "2d6", "1d100"].map(exp => (
+                                            <button 
+                                                key={exp}
+                                                onClick={() => setDiceExpression(exp)}
+                                                className="text-xs bg-gray-700 hover:bg-gray-600 text-gray-300 px-2 py-0.5 rounded"
+                                            >
+                                                {exp}
+                                            </button>
+                                        ))}
+                                    </div>
+                                    <button 
+                                        onClick={() => setShowDice(false)}
+                                        className="text-xs text-gray-500 hover:text-gray-300 self-end mt-1"
+                                    >
+                                        关闭
+                                    </button>
+                                </div>
+                            )}
+
                             {logs.map((log, i) => (
                                 <div key={i} className={`p-2 rounded leading-relaxed ${
                                     log.type === 'narrative' ? 'bg-gray-800 text-yellow-100 border-l-2 border-yellow-600' :
@@ -811,6 +914,13 @@
                             {phase === 'adventure' ? (
                                 // Adventure Controls
                                 <div className="flex gap-2">
+                                    <button
+                                        onClick={() => setShowDice(!showDice)}
+                                        className={`px-3 rounded border ${showDice ? 'bg-purple-700 border-purple-500 text-white' : 'bg-gray-700 border-gray-600 text-gray-400 hover:bg-gray-600'}`}
+                                        title="打开掷骰器"
+                                    >
+                                        🎲
+                                    </button>
                                     <input
                                         type="text"
                                         value={inputAction}
@@ -833,6 +943,12 @@
                                 <div className="space-y-3">
                                     <div className="flex justify-between items-center text-xs text-gray-400 uppercase tracking-wider">
                                         <span>战斗模式 - 选择技能或输入特殊行动</span>
+                                        <button 
+                                            onClick={() => setShowDice(!showDice)}
+                                            className="text-purple-400 hover:text-purple-300 flex items-center gap-1"
+                                        >
+                                            <span>🎲 掷骰器</span>
+                                        </button>
                                         <span>当前目标: {enemies[selectedTargetIndex]?.name || "无"}</span>
                                     </div>
                                     

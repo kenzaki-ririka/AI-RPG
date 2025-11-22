@@ -895,6 +895,7 @@
                     const target = enemies[targetIndex];
                     let reportLines = [];
 
+                    // ... (calculation logic remains same) ...
                     // 1. Player Turn
                     if (target) {
                         const result = calculateDamage(player, target, skill);
@@ -903,27 +904,19 @@
                         } else {
                             const critStr = result.isCrit ? " (暴击!)" : "";
                             reportLines.push(`你对 ${target.name} 造成了 ${result.damage} 点伤害${critStr}。`);
-                            
-                            // Store update
                             jsStatUpdates.enemies.push({ index: targetIndex, hpChange: -result.damage });
                         }
                     }
 
-                    // 2. Enemy Turn (All alive enemies attack)
-                    // We need to simulate this based on current state minus player damage (if instant)
-                    // But for simplicity, let's calculate based on initial state (simultaneous turns or player first)
-                    // Assuming Player First:
+                    // 2. Enemy Turn
                     enemies.forEach((e, idx) => {
-                        // Check if enemy is dead after player attack
                         let currentHp = e.stats.hp;
                         const pendingDmg = jsStatUpdates.enemies.find(u => u.index === idx)?.hpChange || 0;
                         if (currentHp + pendingDmg <= 0) {
                             reportLines.push(`${e.name} 被击败了！`);
-                            return; // Dead enemy doesn't attack
+                            return; 
                         }
 
-                        // Enemy Attack
-                        // Enemy basic attack (no skills for now in JS mode simplified)
                         const eResult = calculateDamage(e, player, null); 
                         if (eResult.damage > 0) {
                              reportLines.push(`${e.name} 攻击你，造成了 ${eResult.damage} 点伤害。`);
@@ -934,19 +927,25 @@
                     });
 
                     combatReport = reportLines.join("\n");
-                    
-                    // Apply JS Updates Locally Immediately? 
-                    // Or wait for AI to confirm/wrap it?
-                    // Strategy: We send the report to AI. AI is told "System generated these results".
-                    // AI should return JSON reflecting these changes (or we force merge them).
-                    // To ensure consistency, let's APPLY JS updates to the 'tempPlayer' and 'enemies' context passed to AI?
-                    // No, Prompt says "Here is the report", AI should output JSON.
-                    // But AI might hallucinate diff numbers.
-                    // BETTER: We apply JS updates to State AFTER getting AI response, ignoring AI's numbers if JS mode is on?
-                    // OR: We trust AI to copy our numbers?
-                    // Let's try: Pass report to AI. Let AI generate narrative. 
-                    // AND we merge JS updates manually in handleUnifiedResponse or here.
-                    // Let's do the merge manually to be safe against AI math fail.
+
+                    // [OPTIMIZATION] If JS Combat AND No Narrative -> SKIP AI ENTIRELY
+                    if (!showNarrative) {
+                        // Construct a mock "AI Result" based purely on JS data
+                        const mockResult = {
+                            narrative: combatReport, // Use the report as narrative
+                            playerStatChanges: jsStatUpdates.player,
+                            enemiesUpdates: jsStatUpdates.enemies.map(u => ({
+                                index: u.index,
+                                hpChange: u.hpChange,
+                                damageTaken: -u.hpChange
+                            }))
+                        };
+                        
+                        // Simulate delay slightly for UX or just run immediately
+                        handleUnifiedResponse(mockResult);
+                        setProcessing(false);
+                        return; // EXIT FUNCTION, DO NOT CALL AI
+                    }
                 }
 
                 try {
@@ -1238,8 +1237,111 @@
                 );
             };
 
+            // Helper to make element draggable
+            const Draggable = ({ children, initialPos }) => {
+                const [pos, setPos] = useState(initialPos || { x: 0, y: 0 });
+                const [dragging, setDragging] = useState(false);
+                const [rel, setRel] = useState(null);
+
+                const onMouseDown = (e) => {
+                    if (e.button !== 0) return;
+                    setDragging(true);
+                    setRel({
+                        x: e.pageX - pos.x,
+                        y: e.pageY - pos.y
+                    });
+                    e.stopPropagation();
+                    e.preventDefault();
+                };
+
+                const onMouseUp = () => {
+                    setDragging(false);
+                };
+
+                const onMouseMove = (e) => {
+                    if (!dragging) return;
+                    setPos({
+                        x: e.pageX - rel.x,
+                        y: e.pageY - rel.y
+                    });
+                    e.stopPropagation();
+                    e.preventDefault();
+                };
+
+                // Global mouse events for smoother dragging
+                useEffect(() => {
+                    if (dragging) {
+                        document.addEventListener('mousemove', onMouseMove);
+                        document.addEventListener('mouseup', onMouseUp);
+                    } else {
+                        document.removeEventListener('mousemove', onMouseMove);
+                        document.removeEventListener('mouseup', onMouseUp);
+                    }
+                    return () => {
+                        document.removeEventListener('mousemove', onMouseMove);
+                        document.removeEventListener('mouseup', onMouseUp);
+                    };
+                }, [dragging]);
+
+                return (
+                    <div 
+                        onMouseDown={onMouseDown}
+                        style={{
+                            position: 'fixed',
+                            left: pos.x + 'px',
+                            top: pos.y + 'px',
+                            zIndex: 1000,
+                            cursor: dragging ? 'grabbing' : 'grab'
+                        }}
+                    >
+                        {children}
+                    </div>
+                );
+            };
+
             return (
                 <div className="flex flex-col h-screen max-w-7xl mx-auto p-2 md:p-4">
+                    {/* Dice Overlay (Floating & Draggable) */}
+                    {showDice && (
+                        <Draggable initialPos={{ x: window.innerWidth - 250, y: window.innerHeight - 200 }}>
+                            <div className="bg-gray-800 p-3 rounded border border-purple-500 shadow-xl flex flex-col gap-2 w-64">
+                                <div className="flex justify-between items-center cursor-grab active:cursor-grabbing border-b border-gray-700 pb-1 mb-1">
+                                    <span className="text-xs text-purple-300 font-bold select-none">🎲 掷骰器 (拖动我)</span>
+                                    <button onClick={() => setShowDice(false)} className="text-gray-500 hover:text-white px-1">×</button>
+                                </div>
+                                <div className="flex gap-2">
+                                    <input 
+                                        type="text" 
+                                        value={diceExpression}
+                                        onChange={(e) => setDiceExpression(e.target.value)}
+                                        onMouseDown={(e) => e.stopPropagation()} // Prevent drag on input
+                                        className="flex-1 p-1 text-sm rounded bg-gray-700 border border-gray-600 text-white"
+                                        placeholder="1d20"
+                                    />
+                                    <button 
+                                        onClick={handleRollDice}
+                                        onMouseDown={(e) => e.stopPropagation()}
+                                        className="bg-purple-600 hover:bg-purple-500 text-white px-3 py-1 rounded text-sm font-bold"
+                                    >
+                                        Roll
+                                    </button>
+                                </div>
+                                <div className="flex gap-1 justify-between">
+                                    {["1d20", "2d6", "1d100"].map(exp => (
+                                        <button 
+                                            key={exp}
+                                            onClick={() => setDiceExpression(exp)}
+                                            onMouseDown={(e) => e.stopPropagation()}
+                                            className="text-xs bg-gray-700 hover:bg-gray-600 text-gray-300 px-2 py-0.5 rounded"
+                                        >
+                                            {exp}
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+                        </Draggable>
+                    )}
+
                     {/* Top Bar with Save/Load */}
                     <div className="flex justify-end gap-2 mb-2 shrink-0">
                         <input 
@@ -1342,45 +1444,6 @@
                                 ref={logContainerRef}
                                 className="flex-1 bg-gray-900 p-4 rounded border border-gray-700 overflow-y-auto space-y-2 font-mono text-sm md:text-base shadow-inner relative"
                             >
-                                {/* Dice Overlay */}
-                                {showDice && (
-                                    <div className="absolute bottom-4 right-4 bg-gray-800 p-3 rounded border border-purple-500 shadow-xl z-20 flex flex-col gap-2 animate-in fade-in slide-in-from-bottom-2">
-                                        <span className="text-xs text-purple-300 font-bold">掷骰子 (Dice Roller)</span>
-                                        <div className="flex gap-2">
-                                            <input 
-                                                type="text" 
-                                                value={diceExpression}
-                                                onChange={(e) => setDiceExpression(e.target.value)}
-                                                className="w-24 p-1 text-sm rounded bg-gray-700 border border-gray-600 text-white"
-                                                placeholder="1d20"
-                                            />
-                                            <button 
-                                                onClick={handleRollDice}
-                                                className="bg-purple-600 hover:bg-purple-500 text-white px-3 py-1 rounded text-sm font-bold"
-                                            >
-                                                Roll
-                                            </button>
-                                        </div>
-                                        <div className="flex gap-1 justify-between">
-                                            {["1d20", "2d6", "1d100"].map(exp => (
-                                                <button 
-                                                    key={exp}
-                                                    onClick={() => setDiceExpression(exp)}
-                                                    className="text-xs bg-gray-700 hover:bg-gray-600 text-gray-300 px-2 py-0.5 rounded"
-                                                >
-                                                    {exp}
-                                                </button>
-                                            ))}
-                                        </div>
-                                        <button 
-                                            onClick={() => setShowDice(false)}
-                                            className="text-xs text-gray-500 hover:text-gray-300 self-end mt-1"
-                                        >
-                                            关闭
-                                        </button>
-                                    </div>
-                                )}
-
                                 {logs.map((log, i) => (
                                     <div key={i} className={`p-2 rounded leading-relaxed ${
                                         log.type === 'narrative' ? 'bg-gray-800 text-yellow-100 border-l-2 border-yellow-600' :

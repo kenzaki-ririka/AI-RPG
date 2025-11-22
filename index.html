@@ -796,22 +796,33 @@
                 let multiplier = 1.0;
 
                 if (skill) {
-                    // Skill damage often replaces or adds to ATK. 
-                    // Let's say skill.damage is a power value (e.g. 50 = 1.5x atk, or flat damage)
-                    // For simplicity: if skill.damage > 0, we use it as base power scaling
-                    if (skill.damage > 0) {
-                        // Assume skill.damage 100 = 100% ATK. 50 = 50% ATK? 
-                        // Or skill.damage is flat? Let's treat as flat + scaling
+                    // Safety check for skill damage
+                    const skillDamage = typeof skill.damage === 'number' ? skill.damage : 0;
+                    
+                    if (skillDamage > 0) {
                         // Hybrid: Skill Dmg + (ATK * 0.5)
-                        rawDamage = skill.damage + (atk * 0.5); 
+                        rawDamage = skillDamage + (atk * 0.5); 
+                    } else {
+                        // If skill has no base damage (e.g. buff/debuff only), but is used as attack?
+                        // Or maybe it shouldn't deal damage? 
+                        // For now, if it's an active skill with 0 damage, we assume it's just a basic attack wrapper OR no damage.
+                        // Let's assume 0 damage skill deals 0 damage (pure status effect).
+                        // But if the user clicked it to attack, maybe they expect something?
+                        // Let's stick to: 0 damage skill = 0 raw damage (only applies effects)
+                        // Unless it's a "basic attack" skill which usually has some dmg.
+                        if (skill.type === 'active' && skillDamage === 0) {
+                             rawDamage = 0; // No damage (e.g. Heal, Buff)
+                        }
                     }
                 }
 
-                // Defense mitigation (simple subtraction with min 1)
-                let damage = Math.max(1, rawDamage - (def * 0.5));
-                
-                if (isCrit) {
-                    damage *= 1.5;
+                // Defense mitigation (simple subtraction with min 1, unless rawDamage is 0)
+                let damage = 0;
+                if (rawDamage > 0) {
+                    damage = Math.max(1, rawDamage - (def * 0.5));
+                    if (isCrit) {
+                        damage *= 1.5;
+                    }
                 }
 
                 return { 
@@ -1584,7 +1595,7 @@
                                                         onClick={() => handleCombatAction('skill', skill)}
                                                         disabled={processing || player.stats.hp <= 0}
                                                         className="flex flex-col items-start px-3 py-2 bg-red-700 hover:bg-red-600 text-white rounded shadow border-b-4 border-red-900 active:border-0 active:translate-y-1 disabled:opacity-50 disabled:translate-y-0 disabled:border-b-4 min-w-[120px]"
-                                                        title={`${skill.name}\n类型: ${skill.type === 'active' ? '主动' : '被动'}\n消耗: ${skill.cost} ${skill.costType}\n伤害/强度: ${skill.damage}\n目标: ${skill.target}\n效果: ${skill.statusEffects ? skill.statusEffects.join(',') : '无'}\n\n${skill.description}`}
+                                                        title={`${skill.name}\n类型: ${skill.type === 'active' ? '主动' : '被动'}\n消耗: ${skill.cost || 0} ${skill.costType || ''}\n伤害/强度: ${skill.damage || 0}\n目标: ${skill.target === 'aoe' ? '范围' : skill.target === 'self' ? '自身' : skill.target === 'all_enemies' ? '全体敌人' : '单体'}\n效果: ${skill.statusEffects && skill.statusEffects.length > 0 ? skill.statusEffects.join(',') : '无'}\n\n${skill.description || ''}`}
                                                     >
                                                         <span className="font-bold text-sm">{skill.name}</span>
                                                         <div className="flex gap-1 text-[10px] opacity-80 mt-1">

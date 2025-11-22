@@ -470,6 +470,65 @@
             const [processing, setProcessing] = useState(false);
 
             const logContainerRef = useRef(null);
+            const fileInputRef = useRef(null);
+
+            // --- Export / Import Handlers ---
+            const handleExport = () => {
+                const gameState = {
+                    player,
+                    phase,
+                    enemies,
+                    selectedTargetIndex,
+                    logs,
+                    timestamp: new Date().toISOString()
+                };
+                const blob = new Blob([JSON.stringify(gameState, null, 2)], { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `ai-rpg-save-${new Date().toISOString().slice(0,10)}.json`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+            };
+
+            const handleImportClick = () => {
+                fileInputRef.current.click();
+            };
+
+            const handleImportFile = (event) => {
+                const file = event.target.files[0];
+                if (!file) return;
+
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    try {
+                        const gameState = JSON.parse(e.target.result);
+                        // Basic validation
+                        if (gameState.player && Array.isArray(gameState.logs)) {
+                            setPlayer(gameState.player);
+                            setPhase(gameState.phase || 'adventure');
+                            setEnemies(gameState.enemies || []);
+                            if (gameState.selectedTargetIndex !== undefined) setSelectedTargetIndex(gameState.selectedTargetIndex);
+                            setLogs(gameState.logs);
+                            // Add a system log to indicate success (without adding to history for export potentially, but useful for user)
+                            // We actually replace logs, so we should probably append this success message to the loaded logs 
+                            // OR just rely on the state update. But appending is nicer.
+                            // However, since logs is state, we can't easily append *after* setLogs in the same tick reliably for display if we just replaced it.
+                            // But we can append to the array before setting.
+                            const newLogs = [...gameState.logs, { text: "✅ 存档/记录已成功导入！", type: "success" }];
+                            setLogs(newLogs);
+                        } else {
+                            throw new Error("文件格式不正确，缺少必要数据");
+                        }
+                    } catch (err) {
+                        alert("导入失败: " + err.message);
+                    }
+                };
+                reader.readAsText(file);
+                event.target.value = ''; // Reset
+            };
 
             useEffect(() => {
                 if (logContainerRef.current) {
@@ -650,6 +709,31 @@
 
             return (
                 <div className="flex flex-col h-screen max-w-5xl mx-auto p-2 md:p-4">
+                    {/* Top Bar with Save/Load */}
+                    <div className="flex justify-end gap-2 mb-2">
+                        <input 
+                            type="file" 
+                            ref={fileInputRef}
+                            onChange={handleImportFile}
+                            style={{ display: 'none' }}
+                            accept=".json"
+                        />
+                        <button 
+                            onClick={handleImportClick}
+                            className="px-3 py-1 text-xs md:text-sm bg-gray-700 hover:bg-gray-600 text-gray-300 rounded border border-gray-600 flex items-center gap-1 transition-colors"
+                            title="导入之前的游戏记录"
+                        >
+                            📂 导入记录
+                        </button>
+                        <button 
+                            onClick={handleExport}
+                            className="px-3 py-1 text-xs md:text-sm bg-gray-700 hover:bg-gray-600 text-gray-300 rounded border border-gray-600 flex items-center gap-1 transition-colors"
+                            title="保存当前游戏记录到本地"
+                        >
+                            💾 导出记录
+                        </button>
+                    </div>
+
                     {/* Header Stats */}
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
                         {/* Player Card */}

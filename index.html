@@ -221,14 +221,14 @@
                         "name": "string (中文名)",
                         "class": "string (中文职业名)",
                         "stats": { 
-                            "hp": number (50-500), 
+                            "hp": number (50-1000), 
                             "maxHp": number (同 hp), 
-                            "mp": number (0-200), 
+                            "mp": number (0-1000), 
                             "maxMp": number (同 mp),
                             "stamina": number (0-100),
                             "maxStamina": number (同 stamina),
                             "attack": number (10-100), 
-                            "defense": number (5-50), 
+                            "defense": number (0-50), 
                             "speed": number (5-50) 
                             // 根据描述添加其他相关属性
                         },
@@ -251,7 +251,7 @@
                     }
                     
                     指导方针：
-                    - 根据职业复杂程度创建 4 到 8 个技能。
+                    - 根据职业复杂程度创建 3 到 10 个技能。
                     - 包含多样化的机制：伤害、治疗、增益 (Buffs)、减益 (Debuffs)。
                     - 如果合适，包含 1-2 个被动技能。
                     - 给角色 3-5 个初始物品（例如：生命药水、口粮、地图、武器）。
@@ -287,15 +287,17 @@
 
                     重要提示：叙述必须使用简体中文。
                     
-                    仅返回符合此结构的有效 JSON：
+                    仅返回符合此结构的有效 JSON。
+                    **关键规则：字段仅在有内容时返回。如果列表为空或没有变化，请完全省略该字段（除了 narrative）。**
+
                     {
-                        "narrative": "string (长篇描述性叙述)",
-                        "statChanges": { "hp": number, "mp": number, ... },
-                        "newItems": [ 
+                        "narrative": "string (必须包含。长篇描述性叙述)",
+                        "statChanges": { "hp": number, ... }, // 可选：仅在属性变化时包含
+                        "newItems": [ // 可选：仅在获得物品时包含
                             { "name": "string", "type": "consumable"|"equipment"|"material", "effect": { "hp": number, "mp": number }, "count": number, "description": "string" }
                         ],
-                        "removedItems": ["string (物品名)"],
-                        "newSkills": [
+                        "removedItems": ["string"], // 可选
+                        "newSkills": [ // 可选：仅在习得新技能时包含
                              { 
                                 "name": "string", 
                                 "type": "active"|"passive", 
@@ -307,19 +309,15 @@
                                 "description": "string" 
                             }
                         ],
-                        "removedSkills": ["string (技能名)"],
-                        "updatedSkills": [
-                             // 结构同 newSkills，将替换同名技能
-                        ],
-                        "newEnemies": [
+                        "removedSkills": ["string"], // 可选
+                        "updatedSkills": [ ... ], // 可选
+                        "newEnemies": [ // 可选：仅在战斗触发时包含
                             { 
                                 "name": "string", 
                                 "stats": { "hp": number, "maxHp": number, "attack": number, "defense": number, "speed": number },
-                                "skills": ["string (技能名或描述)"],
-                                "traits": [
-                                    { "name": "string", "effect": "string (例如：吸血, 反伤)", "description": "string" }
-                                ],
-                                "description": "string (视觉描述)"
+                                "skills": ["string"],
+                                "traits": [ { "name": "string", "effect": "string", "description": "string" } ],
+                                "description": "string"
                             }
                         ]
                     }
@@ -365,24 +363,26 @@
                     
                     ${showNarrative ? "提供生动的战斗描述。" : "提供非常简短的总结。"}
                     
-                    仅返回符合此结构的有效 JSON：
+                    仅返回符合此结构的有效 JSON。
+                    **关键规则：字段仅在有内容时返回。如果没有变化或列表为空，请完全省略该字段（narrative 除外）。**
+
                     {
-                        "narrative": "string",
-                        "playerStatChanges": { "hp": number, "mp": number, ... }, // 相对变化 (例如 -10 hp)
-                        "enemiesUpdates": [
+                        "narrative": "string (必须包含)",
+                        "playerStatChanges": { "hp": number, ... }, // 可选：仅在变化时包含
+                        "enemiesUpdates": [ // 可选：仅在敌人状态变化时包含
                             { 
                                 "index": number, 
                                 "damageTaken": number, 
-                                "hpChange": number, // 可选覆盖，用于治疗/特殊情况
+                                "hpChange": number, 
                                 "statusAdded": "string",
                                 "statusRemoved": "string"
                             }
                         ],
-                        "playerBuffsAdded": [
-                             { "name": "string", "effect": "string (例如 +10 攻击)", "duration": number (回合数), "description": "string", "type": "buff"|"debuff" }
+                        "playerBuffsAdded": [ // 可选
+                             { "name": "string", "effect": "string", "duration": number, "description": "string", "type": "buff"|"debuff" }
                         ],
-                        "playerBuffsRemoved": ["string (Buff 名称)"],
-                        "enemyBuffsAdded": [
+                        "playerBuffsRemoved": ["string"], // 可选
+                        "enemyBuffsAdded": [ // 可选
                              { "enemyIndex": number, "buff": { "name": "string", "description": "string", "duration": number } }
                         ]
                     }

@@ -163,23 +163,37 @@
                         "name": "string (Chinese Name)",
                         "class": "string (Chinese Class)",
                         "stats": { 
-                            "hp": number (50-200), 
+                            "hp": number (50-500), 
                             "maxHp": number (same as hp), 
-                            "mp": number (optional, 0-100), 
-                            "maxMp": number (optional, same as mp),
-                            "stamina": number (optional, 0-100),
-                            "maxStamina": number (optional, same as stamina),
-                            "attack": number (10-30), 
-                            "defense": number (5-20), 
-                            "speed": number (5-20) 
-                            // Add other relevant stats based on description (e.g. 'energy', 'sanity')
+                            "mp": number (0-200), 
+                            "maxMp": number (same as mp),
+                            "stamina": number (0-100),
+                            "maxStamina": number (same as stamina),
+                            "attack": number (10-100), 
+                            "defense": number (5-50), 
+                            "speed": number (5-50) 
+                            // Add other relevant stats based on description
                         },
                         "skills": [
-                            { "name": "string (Chinese Skill Name)", "damage": number (10-50), "cost": number (0-30), "costType": "mp"|"stamina"|"energy", "type": "attack"|"magic"|"support", "description": "string (Chinese)" }
+                            { 
+                                "name": "string (Chinese Skill Name)", 
+                                "type": "active"|"passive", 
+                                "damage": number (0-100, 0 for passive/buff), 
+                                "cost": number (0-50), 
+                                "costType": "mp"|"stamina"|"energy"|"none", 
+                                "target": "single"|"aoe"|"self"|"all_enemies", 
+                                "statusEffects": ["string (e.g. 'burn', 'freeze', 'poison', 'stun', 'disarm', 'bind')"],
+                                "description": "string (Chinese)" 
+                            }
                         ],
-                        "story": "string (Short backstory in Chinese, max 2 sentences)"
+                        "story": "string (Rich backstory in Chinese)"
                     }
-                    Create 3 skills. Ensure resource costs (MP/Stamina) match the stats provided.`
+                    
+                    Guidance:
+                    - Create 4 to 8 skills depending on the class complexity (e.g. Archmages have more spells than Warriors).
+                    - Include diverse mechanics: Damage, Heals, Buffs, Debuffs (Freeze, Burn, Poison, Disarm, Entangle, etc.).
+                    - Include 1-2 Passive skills if appropriate (e.g. 'Mana Regen', 'Thick Skin', 'Counter Attack').
+                    - Ensure resource costs match the stats provided.`
                 },
                 {
                     role: "user",
@@ -198,9 +212,14 @@
                     Current Player: ${player.name} (${player.class}).
                     Stats: ${JSON.stringify(player.stats)}.
                     
-                    The user performs an action. Describe the outcome.
-                    Allow the user to heal, rest, or use items to restore stats (HP, MP, etc.) if the action implies it.
+                    The user performs an action. Describe the outcome in a RICH, ENGAGING, NOVEL-LIKE STYLE.
                     
+                    Style Guidelines:
+                    - Use sensory details (what does the player see, hear, smell?).
+                    - Be verbose rather than brief (3-5 paragraphs is good).
+                    - Provide clear guidance or "hooks" for what the player can do next (e.g. "You notice a glimmer in the dark corner...", "The path splits into two...").
+                    - If the player seems lost, give them a hint.
+
                     IF THE USER INPUT CONTAINS A DICE ROLL (e.g. "(🎲 1d20: 15)"):
                     - Respect the result.
                     - If high (e.g. > 10 for d20), the action succeeds better.
@@ -211,7 +230,7 @@
                     
                     Return ONLY valid JSON:
                     {
-                        "narrative": "string (Description of what happens)",
+                        "narrative": "string (Long, descriptive narrative)",
                         "statChanges": { "hp": number, "mp": number, ... }, // Optional: Relative changes to stats (e.g. {"hp": 20, "mp": -5})
                         "newEnemies": [ // Optional: Only if combat starts
                             { "name": "string", "stats": { "hp": number, "maxHp": number, "attack": number, "defense": number, "speed": number } }
@@ -232,6 +251,9 @@
             
             // Construct enemy state string
             const enemyState = enemies.map((e, i) => `[${i}] ${e.name}: HP ${e.stats.hp}/${e.stats.maxHp}`).join(", ");
+            
+            // Construct player skills string for context
+            const playerSkills = player.skills.map(s => `${s.name} (${s.type}, ${s.cost}${s.costType})`).join(", ");
 
             return [
                 {
@@ -239,7 +261,8 @@
                     content: `You are an RPG Combat Narrator. 
                     The player is fighting ${enemies.length} enemies.
                     
-                    Player: HP ${player.stats.hp}/${player.stats.maxHp}, ATK ${player.stats.attack}, DEF ${player.stats.defense}
+                    Player: ${player.name} (HP ${player.stats.hp}/${player.stats.maxHp}, ATK ${player.stats.attack}, DEF ${player.stats.defense}).
+                    Player Skills/Passives: ${playerSkills}
                     Enemies: ${enemyState}
                     
                     Action: ${JSON.stringify(action)}
@@ -250,14 +273,19 @@
                     - High rolls (e.g. near max) should be critical hits or special effects.
                     - Low rolls might miss.
 
+                    Style Guidelines:
+                    - Describe the combat moves vividly (sparks flying, heavy impacts, magical auras).
+                    - If the player uses a skill with effects (Freeze, Burn, Poison), describe those effects triggering on the enemy.
+                    - Account for Passive skills if relevant (e.g. if player has "Thick Skin", mention they took less damage).
+
                     IMPORTANT: Narrative MUST be in Simplified Chinese (简体中文).
                     
                     Return ONLY valid JSON:
                     {
-                        "narrative": "string (Describe player's attack AND all enemies' counter-attacks)",
+                        "narrative": "string (Vivid combat description)",
                         "playerDamageTaken": number (Total damage player took from ALL enemies this turn),
                         "enemiesUpdates": [
-                            { "index": number, "damageTaken": number } // Damage taken by specific enemies (usually the target)
+                            { "index": number, "damageTaken": number, "statusAdded": "string (optional)" } // Damage taken by specific enemies
                         ]
                     }
                     Rules:
@@ -659,7 +687,14 @@
                 // Construct action object (Skill or Custom Text)
                 let actionObj = {};
                 if (skill) {
-                    actionObj = { name: skill.name, type: skill.type, damage: skill.damage, cost: skill.cost };
+                    actionObj = { 
+                        name: skill.name, 
+                        type: skill.type, 
+                        damage: skill.damage, 
+                        cost: skill.cost,
+                        target: skill.target,
+                        effects: skill.statusEffects || []
+                    };
                 } else {
                     if (!inputAction.trim()) return;
                     actionObj = { name: inputAction.trim(), type: 'custom' };
@@ -953,18 +988,37 @@
                                     </div>
                                     
                                     {/* Skills */}
-                                    <div className="flex gap-2 flex-wrap">
-                                        {player.skills.map((skill, i) => (
-                                            <button
-                                                key={i}
-                                                onClick={() => handleCombatAction('skill', skill)}
-                                                disabled={processing || player.stats.hp <= 0}
-                                                className="px-4 py-2 bg-red-700 hover:bg-red-600 text-white rounded shadow border-b-4 border-red-900 active:border-0 active:translate-y-1 disabled:opacity-50 disabled:translate-y-0 disabled:border-b-4"
-                                                title={skill.description}
-                                            >
-                                                {skill.name} <span className="opacity-75 text-xs">({skill.cost ? `${skill.cost}MP` : ''})</span>
-                                            </button>
-                                        ))}
+                                    <div className="flex flex-col gap-2">
+                                        {/* Active Skills */}
+                                        <div className="flex gap-2 flex-wrap">
+                                            {player.skills.filter(s => s.type !== 'passive').map((skill, i) => (
+                                                <button
+                                                    key={i}
+                                                    onClick={() => handleCombatAction('skill', skill)}
+                                                    disabled={processing || player.stats.hp <= 0}
+                                                    className="flex flex-col items-start px-3 py-2 bg-red-700 hover:bg-red-600 text-white rounded shadow border-b-4 border-red-900 active:border-0 active:translate-y-1 disabled:opacity-50 disabled:translate-y-0 disabled:border-b-4 min-w-[120px]"
+                                                    title={skill.description}
+                                                >
+                                                    <span className="font-bold text-sm">{skill.name}</span>
+                                                    <div className="flex gap-1 text-[10px] opacity-80 mt-1">
+                                                        {skill.cost > 0 && <span>{skill.cost}{skill.costType}</span>}
+                                                        {skill.target && <span className="bg-black/30 px-1 rounded">{skill.target === 'aoe' ? '范围' : skill.target === 'self' ? '自身' : '单体'}</span>}
+                                                    </div>
+                                                </button>
+                                            ))}
+                                        </div>
+                                        
+                                        {/* Passive Skills */}
+                                        {player.skills.some(s => s.type === 'passive') && (
+                                            <div className="bg-gray-700/50 p-2 rounded border border-gray-600 flex flex-wrap gap-2">
+                                                <span className="text-xs text-gray-400 uppercase font-bold">被动技能:</span>
+                                                {player.skills.filter(s => s.type === 'passive').map((skill, i) => (
+                                                    <div key={i} className="text-xs bg-gray-800 px-2 py-1 rounded text-gray-300 border border-gray-700" title={skill.description}>
+                                                        {skill.name}
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        )}
                                     </div>
 
                                     {/* Custom Combat Action */}

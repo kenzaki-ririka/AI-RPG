@@ -232,15 +232,13 @@
                             // 根据描述添加其他相关属性
                         },
                         "skills": [
-                            { 
-                                "name": "string (中文技能名)", 
-                                "type": "active"|"passive", 
-                                "damage": number (0-100+, 被动/增益技能为0), 
-                                "cost": number (0-100+), 
-                                "costType": "mp"|"stamina"|"energy"|"none", 
-                                "target": "single"|"aoe"|"self"|"all_enemies", 
-                                "statusEffects": ["string (如 'burn', 'freeze', 'poison', 'stun', 'disarm', 'bind')"],
-                                "description": "string (中文描述)" 
+                            // ... (战斗技能) ...
+                        ],
+                        "nonCombatSkills": [
+                            {
+                                "name": "string (技能名，如'黑客','话术','侦查','机械维修','神秘学')",
+                                "value": number (0-100, 普通人未受训为5-10, 专家为60+, 大师为90+),
+                                "description": "string"
                             }
                         ],
                         "items": [
@@ -253,6 +251,7 @@
                     - 根据职业复杂程度创建 3 到 10 个技能。
                     - 包含多样化的机制：伤害、治疗、增益 (Buffs)、减益 (Debuffs)。
                     - 如果合适，包含 1-2 个被动技能。
+                    - **非战斗技能**：请给予 3-6 个符合背景的生活/职业技能（如黑客、侦查、驾驶、历史学），数值 0-100。
                     - 给角色 3-5 个初始物品（例如：生命药水、口粮、地图、武器）。
                     - **数值设定原则**：请根据角色的背景描述（如种族、职业、经历）来合理设定数值，不要受限于固定范围。如果是强大的英雄，数值可以远超普通人标准。`
                 },
@@ -285,6 +284,7 @@
                 : "当前无敌人";
 
             const playerSkills = player.skills.map(s => `${s.name} (${s.type}, ${s.cost}${s.costType})`).join(", ");
+            const playerNonCombatSkills = player.nonCombatSkills ? player.nonCombatSkills.map(s => `${s.name}: ${s.value}`).join(", ") : "无";
             const playerBuffs = player.buffs ? JSON.stringify(player.buffs) : "无";
 
             const systemInstruction = {
@@ -296,7 +296,8 @@
                 当前玩家: ${player.name} (${player.class}).
                 背景故事: ${player.description || "未知"}
                 属性: ${JSON.stringify(player.stats)}.
-                技能: ${playerSkills}
+                战斗技能: ${playerSkills}
+                非战斗技能 (d100): ${playerNonCombatSkills}
                 Buffs: ${playerBuffs}
                 物品栏: ${JSON.stringify(player.items || [])}.
                 
@@ -308,8 +309,12 @@
                 【你的任务】
                 根据用户的行动和当前状态，生成下一阶段的剧情或战斗结果。
                 必须保持上下文连贯性。记得之前的剧情和状态。
-                ${combatReport ? '注意：数值结果已由系统决定，你只需负责描述画面。' : '任务：1. 计算伤害与结果。 2. 管理状态。'}
                 
+                **非战斗检定原则**：
+                - 当玩家进行需专业知识的行动（如黑客、修理、说服）时，参考其非战斗技能数值。
+                - 高数值（如 70+）应大概率成功，低数值可能失败。你可以在描述中模拟检定过程（如“你尝试破解... (检定: 45/70 成功)”）。
+                - 如果玩家频繁成功使用某技能，可给予 **成长奖励**（通过 skillUpdates 提升数值）。
+
                 ${phase === 'combat' && !showNarrative ? '请提供简短的战斗总结。' : '请以丰富、引人入胜的小说风格描述结果 (简体中文)。'}
 
                 【JSON 返回格式】
@@ -325,6 +330,12 @@
                     "newSkills": [ { "name": "string", "type": "active"|"passive", "damage": number, "cost": number, ... } ],
                     "updatedSkills": [ ... ],
                     "removedSkills": ["string"],
+                    
+                    // 非战斗技能成长/变动
+                    "nonCombatSkillUpdates": [ 
+                        { "name": "string", "change": number (例如 +2), "isNew": boolean (是否新习得), "description": "string (可选)" } 
+                    ],
+
                     "buffsAdded": [ { "name": "string", "effect": "string", "duration": number, "description": "string", "type": "buff"|"debuff" } ],
                     "buffsRemoved": ["string"],
 
@@ -1075,35 +1086,46 @@
                         });
                     }
 
-                    // Buffs
-                    if (result.buffsAdded) {
-                        result.buffsAdded.forEach(buff => {
-                            newBuffs.push(buff);
-                            addLog(`🔼 获得状态: ${buff.name} (${buff.description})`, 'success');
+                    // Non-Combat Skills
+                    if (result.nonCombatSkillUpdates) {
+                        result.nonCombatSkillUpdates.forEach(update => {
+                            let updatedList = prev.nonCombatSkills ? [...prev.nonCombatSkills] : [];
+                            const idx = updatedList.findIndex(s => s.name === update.name);
+                            
+                            if (idx >= 0) {
+                                updatedList[idx].value = Math.min(100, Math.max(0, updatedList[idx].value + update.change));
+                                addLog(`📈 技能变动: ${update.name} ${update.change > 0 ? '+' : ''}${update.change} => ${updatedList[idx].value}`, 'success');
+                            } else if (update.isNew) {
+                                updatedList.push({ name: update.name, value: update.change || 10, description: update.description || "新习得" });
+                                addLog(`💡 习得新技能: ${update.name} (Lv.${update.change || 10})`, 'success');
+                            }
+                            
+                            // Assign to prev copy to ensure next iteration sees it? No, we replace whole list at end.
+                            // So we just update local variable 'updatedList'
+                            prev.nonCombatSkills = updatedList; // Mutating clone effectively or just use it later
+                            // Actually let's just use 'nonCombatSkills: updatedList' in return
                         });
+                        // We need to persist this change. 
+                        // Since forEach is sync, we can just set a variable outside.
                     }
-                    // Alias for combat prompt
-                    if (result.playerBuffsAdded) {
-                        result.playerBuffsAdded.forEach(buff => {
-                            newBuffs.push(buff);
-                            addLog(`🔼 获得状态: ${buff.name} (${buff.description})`, 'success');
+                    const finalNonCombatSkills = prev.nonCombatSkills ? [...prev.nonCombatSkills] : []; // Re-read in case logic above was messy
+                    // Actually, let's rewrite that block cleanly
+                    
+                    let currentNonCombatSkills = prev.nonCombatSkills ? [...prev.nonCombatSkills] : [];
+                    if (result.nonCombatSkillUpdates) {
+                        result.nonCombatSkillUpdates.forEach(update => {
+                            const idx = currentNonCombatSkills.findIndex(s => s.name === update.name);
+                            if (idx >= 0) {
+                                currentNonCombatSkills[idx] = { ...currentNonCombatSkills[idx], value: Math.min(100, Math.max(0, currentNonCombatSkills[idx].value + update.change)) };
+                                addLog(`📈 技能变动: ${update.name} ${update.change > 0 ? '+' : ''}${update.change} => ${currentNonCombatSkills[idx].value}`, 'success');
+                            } else if (update.isNew) {
+                                currentNonCombatSkills.push({ name: update.name, value: update.change || 10, description: update.description || "新习得" });
+                                addLog(`💡 习得新技能: ${update.name} (Lv.${update.change || 10})`, 'success');
+                            }
                         });
                     }
 
-                    if (result.buffsRemoved) {
-                        result.buffsRemoved.forEach(name => {
-                            newBuffs = newBuffs.filter(b => b.name !== name);
-                            addLog(`🔽 状态消失: ${name}`, 'neutral');
-                        });
-                    }
-                     if (result.playerBuffsRemoved) {
-                        result.playerBuffsRemoved.forEach(name => {
-                            newBuffs = newBuffs.filter(b => b.name !== name);
-                            addLog(`🔽 状态消失: ${name}`, 'neutral');
-                        });
-                    }
-
-                    return { ...prev, stats: newStats, items: newItems, skills: newSkillsList, buffs: newBuffs };
+                    return { ...prev, stats: newStats, items: newItems, skills: newSkillsList, buffs: newBuffs, nonCombatSkills: currentNonCombatSkills };
                 });
 
                 // 3. World/Enemy Updates
@@ -1403,6 +1425,23 @@
                                             {player.buffs.map((buff, i) => (
                                                 <div key={i} className="text-xs bg-blue-900/50 border border-blue-500 px-2 py-1 rounded text-blue-200 cursor-help" title={`${buff.description || buff.effect} (剩余: ${buff.duration} 回合)`}>
                                                     {buff.name}
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* Non-Combat Skills Section */}
+                                {player.nonCombatSkills && player.nonCombatSkills.length > 0 && (
+                                    <div className="mt-4">
+                                        <h3 className="text-xs font-bold text-teal-400 uppercase mb-2">生活/探索技能 (d100)</h3>
+                                        <div className="space-y-1">
+                                            {player.nonCombatSkills.map((skill, i) => (
+                                                <div key={i} className="flex justify-between text-xs bg-gray-700/30 p-1 rounded border border-gray-600" title={skill.description}>
+                                                    <span className="text-gray-300">{skill.name}</span>
+                                                    <span className={`font-mono font-bold ${skill.value >= 80 ? 'text-yellow-400' : skill.value >= 50 ? 'text-teal-300' : 'text-gray-500'}`}>
+                                                        {skill.value}
+                                                    </span>
                                                 </div>
                                             ))}
                                         </div>

@@ -957,9 +957,9 @@
             };
 
             return (
-                <div className="flex flex-col h-screen max-w-5xl mx-auto p-2 md:p-4">
+                <div className="flex flex-col h-screen max-w-7xl mx-auto p-2 md:p-4">
                     {/* Top Bar with Save/Load */}
-                    <div className="flex justify-end gap-2 mb-2">
+                    <div className="flex justify-end gap-2 mb-2 shrink-0">
                         <input 
                             type="file" 
                             ref={fileInputRef}
@@ -983,257 +983,263 @@
                         </button>
                     </div>
 
-                    {/* Header Stats */}
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-                        {/* Player Card */}
-                        <div className="bg-gray-800 p-4 rounded border border-gray-600 relative">
-                            <div className="flex justify-between items-center mb-3">
-                                <h2 className="text-xl font-bold text-purple-400">{player.name}</h2>
-                                <div className="flex gap-2">
-                                    <button 
-                                        onClick={() => setShowInventory(!showInventory)}
-                                        className="text-xs bg-gray-700 hover:bg-gray-600 px-2 py-1 rounded text-gray-300 flex items-center gap-1"
-                                    >
-                                        🎒 物品 ({player.items ? player.items.length : 0})
-                                    </button>
-                                    <span className="text-xs bg-gray-700 px-2 py-1 rounded text-gray-300">{player.class}</span>
-                                </div>
-                            </div>
-                            
-                            {renderStats()}
-
-                            {/* Inventory Overlay */}
-                            {showInventory && (
-                                <div className="absolute top-12 right-2 w-64 bg-gray-900 border border-gray-500 rounded shadow-xl z-20 max-h-80 overflow-y-auto">
-                                    <div className="p-2 border-b border-gray-700 flex justify-between items-center bg-gray-800">
-                                        <span className="text-sm font-bold text-gray-200">背包</span>
-                                        <button onClick={() => setShowInventory(false)} className="text-gray-500 hover:text-white">×</button>
-                                    </div>
-                                    <div className="p-2 space-y-2">
-                                        {player.items && player.items.length > 0 ? (
-                                            player.items.map((item, idx) => (
-                                                <div key={idx} className="bg-gray-800 p-2 rounded border border-gray-700 text-sm">
-                                                    <div className="flex justify-between">
-                                                        <span className="font-bold text-purple-300">{item.name}</span>
-                                                        <span className="text-gray-400">x{item.count}</span>
-                                                    </div>
-                                                    <p className="text-xs text-gray-500 mb-1">{item.description}</p>
-                                                    {item.type === 'consumable' && (
-                                                        <button 
-                                                            onClick={() => handleUseItem(idx)}
-                                                            className="w-full bg-green-800 hover:bg-green-700 text-green-100 text-xs py-1 rounded"
-                                                        >
-                                                            使用
-                                                        </button>
-                                                    )}
-                                                </div>
-                                            ))
-                                        ) : (
-                                            <div className="text-center text-gray-500 py-4 text-xs">背包是空的</div>
-                                        )}
-                                    </div>
-                                </div>
-                            )}
-                        </div>
-
-                        {/* Enemy List (Only in Combat) */}
-                        {phase === 'combat' && (
-                            <div className="bg-gray-800 p-4 rounded border border-gray-600 overflow-y-auto max-h-40">
-                                <h3 className="text-sm font-bold text-red-400 mb-2 sticky top-0 bg-gray-800">敌人列表 (点击选择目标)</h3>
-                                <div className="space-y-2">
-                                    {enemies.map((enemy, idx) => (
-                                        <div 
-                                            key={idx}
-                                            onClick={() => setSelectedTargetIndex(idx)}
-                                            className={`p-2 rounded border cursor-pointer transition-colors ${
-                                                selectedTargetIndex === idx 
-                                                ? 'bg-red-900/40 border-red-500' 
-                                                : 'bg-gray-700/50 border-transparent hover:bg-gray-700'
-                                            }`}
-                                        >
-                                            <div className="flex justify-between items-center">
-                                                <span className={selectedTargetIndex === idx ? "text-red-300 font-bold" : "text-gray-300"}>
-                                                    {enemy.name}
-                                                </span>
-                                                <span className="text-xs text-gray-400">HP: {enemy.stats.hp}/{enemy.stats.maxHp}</span>
-                                            </div>
-                                            <div className="w-full bg-gray-900 rounded-full h-1.5 mt-1">
-                                                <div 
-                                                    className="bg-red-500 h-full rounded-full transition-all duration-500" 
-                                                    style={{ width: `${(enemy.stats.hp / enemy.stats.maxHp) * 100}%` }}
-                                                ></div>
-                                            </div>
-                                        </div>
-                                    ))}
-                                </div>
-                            </div>
-                        )}
-                    </div>
-
-                    {/* Main Game Area */}
-                    <div className="flex-1 flex flex-col gap-4 overflow-hidden">
-                        {/* Log/Narrative Area */}
-                        <div 
-                            ref={logContainerRef}
-                            className="flex-1 bg-gray-900 p-4 rounded border border-gray-700 overflow-y-auto space-y-2 font-mono text-sm md:text-base shadow-inner relative"
-                        >
-                            {/* Dice Overlay */}
-                            {showDice && (
-                                <div className="absolute bottom-4 right-4 bg-gray-800 p-3 rounded border border-purple-500 shadow-xl z-20 flex flex-col gap-2 animate-in fade-in slide-in-from-bottom-2">
-                                    <span className="text-xs text-purple-300 font-bold">掷骰子 (Dice Roller)</span>
+                    {/* Main Game Layout */}
+                    <div className="flex-1 flex flex-col lg:flex-row gap-4 overflow-hidden">
+                        
+                        {/* LEFT PANEL: Player Stats */}
+                        <div className="lg:w-72 shrink-0 flex flex-col gap-4 overflow-y-auto lg:overflow-y-visible">
+                            <div className="bg-gray-800 p-4 rounded border border-gray-600 relative">
+                                <div className="flex justify-between items-center mb-3">
+                                    <h2 className="text-xl font-bold text-purple-400">{player.name}</h2>
                                     <div className="flex gap-2">
-                                        <input 
-                                            type="text" 
-                                            value={diceExpression}
-                                            onChange={(e) => setDiceExpression(e.target.value)}
-                                            className="w-24 p-1 text-sm rounded bg-gray-700 border border-gray-600 text-white"
-                                            placeholder="1d20"
-                                        />
                                         <button 
-                                            onClick={handleRollDice}
-                                            className="bg-purple-600 hover:bg-purple-500 text-white px-3 py-1 rounded text-sm font-bold"
+                                            onClick={() => setShowInventory(!showInventory)}
+                                            className="text-xs bg-gray-700 hover:bg-gray-600 px-2 py-1 rounded text-gray-300 flex items-center gap-1"
                                         >
-                                            Roll
+                                            🎒 物品 ({player.items ? player.items.length : 0})
                                         </button>
+                                        <span className="text-xs bg-gray-700 px-2 py-1 rounded text-gray-300">{player.class}</span>
                                     </div>
-                                    <div className="flex gap-1 justify-between">
-                                        {["1d20", "2d6", "1d100"].map(exp => (
-                                            <button 
-                                                key={exp}
-                                                onClick={() => setDiceExpression(exp)}
-                                                className="text-xs bg-gray-700 hover:bg-gray-600 text-gray-300 px-2 py-0.5 rounded"
-                                            >
-                                                {exp}
-                                            </button>
-                                        ))}
-                                    </div>
-                                    <button 
-                                        onClick={() => setShowDice(false)}
-                                        className="text-xs text-gray-500 hover:text-gray-300 self-end mt-1"
-                                    >
-                                        关闭
-                                    </button>
                                 </div>
-                            )}
+                                
+                                {renderStats()}
 
-                            {logs.map((log, i) => (
-                                <div key={i} className={`p-2 rounded leading-relaxed ${
-                                    log.type === 'narrative' ? 'bg-gray-800 text-yellow-100 border-l-2 border-yellow-600' :
-                                    log.type === 'combat' ? 'bg-red-900/20 text-red-100 border-l-2 border-red-600' :
-                                    log.type === 'action' ? 'bg-gray-700/50 text-gray-300 text-right italic' :
-                                    log.type === 'success' ? 'bg-green-900/30 text-green-200 border-l-2 border-green-500' :
-                                    log.type === 'danger' ? 'bg-red-600 text-white font-bold text-center' :
-                                    'text-gray-300'
-                                }`}>
-                                    {log.text}
-                                </div>
-                            ))}
-                            {processing && (
-                                <div className="flex items-center gap-2 text-gray-400 italic p-2">
-                                    <span className="animate-spin">✦</span> AI 正在生成...
-                                </div>
-                            )}
+                                {/* Inventory Overlay - Adjusted for sidebar */}
+                                {showInventory && (
+                                    <div className="absolute top-12 left-0 lg:left-full lg:top-0 lg:ml-2 w-64 bg-gray-900 border border-gray-500 rounded shadow-xl z-50 max-h-80 overflow-y-auto">
+                                        <div className="p-2 border-b border-gray-700 flex justify-between items-center bg-gray-800">
+                                            <span className="text-sm font-bold text-gray-200">背包</span>
+                                            <button onClick={() => setShowInventory(false)} className="text-gray-500 hover:text-white">×</button>
+                                        </div>
+                                        <div className="p-2 space-y-2">
+                                            {player.items && player.items.length > 0 ? (
+                                                player.items.map((item, idx) => (
+                                                    <div key={idx} className="bg-gray-800 p-2 rounded border border-gray-700 text-sm">
+                                                        <div className="flex justify-between">
+                                                            <span className="font-bold text-purple-300">{item.name}</span>
+                                                            <span className="text-gray-400">x{item.count}</span>
+                                                        </div>
+                                                        <p className="text-xs text-gray-500 mb-1">{item.description}</p>
+                                                        {item.type === 'consumable' && (
+                                                            <button 
+                                                                onClick={() => handleUseItem(idx)}
+                                                                className="w-full bg-green-800 hover:bg-green-700 text-green-100 text-xs py-1 rounded"
+                                                            >
+                                                                使用
+                                                            </button>
+                                                        )}
+                                                    </div>
+                                                ))
+                                            ) : (
+                                                <div className="text-center text-gray-500 py-4 text-xs">背包是空的</div>
+                                            )}
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
                         </div>
 
-                        {/* Input / Controls Area */}
-                        <div className="bg-gray-800 p-4 rounded border border-gray-600 shadow-lg z-10">
-                            {phase === 'adventure' ? (
-                                // Adventure Controls
-                                <div className="flex gap-2">
-                                    <button
-                                        onClick={() => setShowDice(!showDice)}
-                                        className={`px-3 rounded border ${showDice ? 'bg-purple-700 border-purple-500 text-white' : 'bg-gray-700 border-gray-600 text-gray-400 hover:bg-gray-600'}`}
-                                        title="打开掷骰器"
-                                    >
-                                        🎲
-                                    </button>
-                                    <input
-                                        type="text"
-                                        value={inputAction}
-                                        onChange={(e) => setInputAction(e.target.value)}
-                                        onKeyDown={(e) => e.key === 'Enter' && handleAdventureAction()}
-                                        placeholder="输入你的行动 (例如: 向北探索，寻找水源，调查神庙...)"
-                                        className="flex-1 p-3 rounded bg-gray-700 border border-gray-600 focus:border-purple-500 focus:outline-none text-white"
-                                        disabled={processing}
-                                    />
-                                    <button
-                                        onClick={handleAdventureAction}
-                                        disabled={processing || !inputAction.trim()}
-                                        className="px-6 bg-purple-600 hover:bg-purple-500 text-white font-bold rounded shadow disabled:opacity-50"
-                                    >
-                                        行动
-                                    </button>
-                                </div>
-                            ) : (
-                                // Combat Controls
-                                <div className="space-y-3">
-                                    <div className="flex justify-between items-center text-xs text-gray-400 uppercase tracking-wider">
-                                        <span>战斗模式 - 选择技能或输入特殊行动</span>
-                                        <button 
-                                            onClick={() => setShowDice(!showDice)}
-                                            className="text-purple-400 hover:text-purple-300 flex items-center gap-1"
-                                        >
-                                            <span>🎲 掷骰器</span>
-                                        </button>
-                                        <span>当前目标: {enemies[selectedTargetIndex]?.name || "无"}</span>
-                                    </div>
-                                    
-                                    {/* Skills */}
-                                    <div className="flex flex-col gap-2">
-                                        {/* Active Skills */}
-                                        <div className="flex gap-2 flex-wrap">
-                                            {player.skills.filter(s => s.type !== 'passive').map((skill, i) => (
-                                                <button
-                                                    key={i}
-                                                    onClick={() => handleCombatAction('skill', skill)}
-                                                    disabled={processing || player.stats.hp <= 0}
-                                                    className="flex flex-col items-start px-3 py-2 bg-red-700 hover:bg-red-600 text-white rounded shadow border-b-4 border-red-900 active:border-0 active:translate-y-1 disabled:opacity-50 disabled:translate-y-0 disabled:border-b-4 min-w-[120px]"
-                                                    title={skill.description}
+                        {/* CENTER PANEL: Main Game Area (Logs + Input) */}
+                        <div className="flex-1 flex flex-col gap-4 overflow-hidden min-w-0 order-last lg:order-none">
+                            {/* Log/Narrative Area */}
+                            <div 
+                                ref={logContainerRef}
+                                className="flex-1 bg-gray-900 p-4 rounded border border-gray-700 overflow-y-auto space-y-2 font-mono text-sm md:text-base shadow-inner relative"
+                            >
+                                {/* Dice Overlay */}
+                                {showDice && (
+                                    <div className="absolute bottom-4 right-4 bg-gray-800 p-3 rounded border border-purple-500 shadow-xl z-20 flex flex-col gap-2 animate-in fade-in slide-in-from-bottom-2">
+                                        <span className="text-xs text-purple-300 font-bold">掷骰子 (Dice Roller)</span>
+                                        <div className="flex gap-2">
+                                            <input 
+                                                type="text" 
+                                                value={diceExpression}
+                                                onChange={(e) => setDiceExpression(e.target.value)}
+                                                className="w-24 p-1 text-sm rounded bg-gray-700 border border-gray-600 text-white"
+                                                placeholder="1d20"
+                                            />
+                                            <button 
+                                                onClick={handleRollDice}
+                                                className="bg-purple-600 hover:bg-purple-500 text-white px-3 py-1 rounded text-sm font-bold"
+                                            >
+                                                Roll
+                                            </button>
+                                        </div>
+                                        <div className="flex gap-1 justify-between">
+                                            {["1d20", "2d6", "1d100"].map(exp => (
+                                                <button 
+                                                    key={exp}
+                                                    onClick={() => setDiceExpression(exp)}
+                                                    className="text-xs bg-gray-700 hover:bg-gray-600 text-gray-300 px-2 py-0.5 rounded"
                                                 >
-                                                    <span className="font-bold text-sm">{skill.name}</span>
-                                                    <div className="flex gap-1 text-[10px] opacity-80 mt-1">
-                                                        {skill.cost > 0 && <span>{skill.cost}{skill.costType}</span>}
-                                                        {skill.target && <span className="bg-black/30 px-1 rounded">{skill.target === 'aoe' ? '范围' : skill.target === 'self' ? '自身' : '单体'}</span>}
-                                                    </div>
+                                                    {exp}
                                                 </button>
                                             ))}
                                         </div>
-                                        
-                                        {/* Passive Skills */}
-                                        {player.skills.some(s => s.type === 'passive') && (
-                                            <div className="bg-gray-700/50 p-2 rounded border border-gray-600 flex flex-wrap gap-2">
-                                                <span className="text-xs text-gray-400 uppercase font-bold">被动技能:</span>
-                                                {player.skills.filter(s => s.type === 'passive').map((skill, i) => (
-                                                    <div key={i} className="text-xs bg-gray-800 px-2 py-1 rounded text-gray-300 border border-gray-700" title={skill.description}>
-                                                        {skill.name}
-                                                    </div>
-                                                ))}
-                                            </div>
-                                        )}
+                                        <button 
+                                            onClick={() => setShowDice(false)}
+                                            className="text-xs text-gray-500 hover:text-gray-300 self-end mt-1"
+                                        >
+                                            关闭
+                                        </button>
                                     </div>
+                                )}
 
-                                    {/* Custom Combat Action */}
+                                {logs.map((log, i) => (
+                                    <div key={i} className={`p-2 rounded leading-relaxed ${
+                                        log.type === 'narrative' ? 'bg-gray-800 text-yellow-100 border-l-2 border-yellow-600' :
+                                        log.type === 'combat' ? 'bg-red-900/20 text-red-100 border-l-2 border-red-600' :
+                                        log.type === 'action' ? 'bg-gray-700/50 text-gray-300 text-right italic' :
+                                        log.type === 'success' ? 'bg-green-900/30 text-green-200 border-l-2 border-green-500' :
+                                        log.type === 'danger' ? 'bg-red-600 text-white font-bold text-center' :
+                                        'text-gray-300'
+                                    }`}>
+                                        {log.text}
+                                    </div>
+                                ))}
+                                {processing && (
+                                    <div className="flex items-center gap-2 text-gray-400 italic p-2">
+                                        <span className="animate-spin">✦</span> AI 正在生成...
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* Input / Controls Area */}
+                            <div className="bg-gray-800 p-4 rounded border border-gray-600 shadow-lg z-10">
+                                {phase === 'adventure' ? (
+                                    // Adventure Controls
                                     <div className="flex gap-2">
+                                        <button
+                                            onClick={() => setShowDice(!showDice)}
+                                            className={`px-3 rounded border ${showDice ? 'bg-purple-700 border-purple-500 text-white' : 'bg-gray-700 border-gray-600 text-gray-400 hover:bg-gray-600'}`}
+                                            title="打开掷骰器"
+                                        >
+                                            🎲
+                                        </button>
                                         <input
                                             type="text"
                                             value={inputAction}
                                             onChange={(e) => setInputAction(e.target.value)}
-                                            onKeyDown={(e) => e.key === 'Enter' && handleCombatAction('custom')}
-                                            placeholder="尝试特殊战斗行动 (例如: 寻找掩体，投掷沙石...)"
-                                            className="flex-1 p-2 rounded bg-gray-700 border border-gray-600 focus:border-red-500 focus:outline-none text-white text-sm"
+                                            onKeyDown={(e) => e.key === 'Enter' && handleAdventureAction()}
+                                            placeholder="输入你的行动 (例如: 向北探索，寻找水源，调查神庙...)"
+                                            className="flex-1 p-3 rounded bg-gray-700 border border-gray-600 focus:border-purple-500 focus:outline-none text-white"
                                             disabled={processing}
                                         />
                                         <button
-                                            onClick={() => handleCombatAction('custom')}
+                                            onClick={handleAdventureAction}
                                             disabled={processing || !inputAction.trim()}
-                                            className="px-4 bg-gray-600 hover:bg-gray-500 text-white text-sm font-bold rounded disabled:opacity-50"
+                                            className="px-6 bg-purple-600 hover:bg-purple-500 text-white font-bold rounded shadow disabled:opacity-50"
                                         >
-                                            执行
+                                            行动
                                         </button>
+                                    </div>
+                                ) : (
+                                    // Combat Controls
+                                    <div className="space-y-3">
+                                        <div className="flex justify-between items-center text-xs text-gray-400 uppercase tracking-wider">
+                                            <span>战斗模式 - 选择技能或输入特殊行动</span>
+                                            <button 
+                                                onClick={() => setShowDice(!showDice)}
+                                                className="text-purple-400 hover:text-purple-300 flex items-center gap-1"
+                                            >
+                                                <span>🎲 掷骰器</span>
+                                            </button>
+                                            <span>当前目标: {enemies[selectedTargetIndex]?.name || "无"}</span>
+                                        </div>
+                                        
+                                        {/* Skills */}
+                                        <div className="flex flex-col gap-2">
+                                            {/* Active Skills */}
+                                            <div className="flex gap-2 flex-wrap">
+                                                {player.skills.filter(s => s.type !== 'passive').map((skill, i) => (
+                                                    <button
+                                                        key={i}
+                                                        onClick={() => handleCombatAction('skill', skill)}
+                                                        disabled={processing || player.stats.hp <= 0}
+                                                        className="flex flex-col items-start px-3 py-2 bg-red-700 hover:bg-red-600 text-white rounded shadow border-b-4 border-red-900 active:border-0 active:translate-y-1 disabled:opacity-50 disabled:translate-y-0 disabled:border-b-4 min-w-[120px]"
+                                                        title={skill.description}
+                                                    >
+                                                        <span className="font-bold text-sm">{skill.name}</span>
+                                                        <div className="flex gap-1 text-[10px] opacity-80 mt-1">
+                                                            {skill.cost > 0 && <span>{skill.cost}{skill.costType}</span>}
+                                                            {skill.target && <span className="bg-black/30 px-1 rounded">{skill.target === 'aoe' ? '范围' : skill.target === 'self' ? '自身' : '单体'}</span>}
+                                                        </div>
+                                                    </button>
+                                                ))}
+                                            </div>
+                                            
+                                            {/* Passive Skills */}
+                                            {player.skills.some(s => s.type === 'passive') && (
+                                                <div className="bg-gray-700/50 p-2 rounded border border-gray-600 flex flex-wrap gap-2">
+                                                    <span className="text-xs text-gray-400 uppercase font-bold">被动技能:</span>
+                                                    {player.skills.filter(s => s.type === 'passive').map((skill, i) => (
+                                                        <div key={i} className="text-xs bg-gray-800 px-2 py-1 rounded text-gray-300 border border-gray-700" title={skill.description}>
+                                                            {skill.name}
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            )}
+                                        </div>
+
+                                        {/* Custom Combat Action */}
+                                        <div className="flex gap-2">
+                                            <input
+                                                type="text"
+                                                value={inputAction}
+                                                onChange={(e) => setInputAction(e.target.value)}
+                                                onKeyDown={(e) => e.key === 'Enter' && handleCombatAction('custom')}
+                                                placeholder="尝试特殊战斗行动 (例如: 寻找掩体，投掷沙石...)"
+                                                className="flex-1 p-2 rounded bg-gray-700 border border-gray-600 focus:border-red-500 focus:outline-none text-white text-sm"
+                                                disabled={processing}
+                                            />
+                                            <button
+                                                onClick={() => handleCombatAction('custom')}
+                                                disabled={processing || !inputAction.trim()}
+                                                className="px-4 bg-gray-600 hover:bg-gray-500 text-white text-sm font-bold rounded disabled:opacity-50"
+                                            >
+                                                执行
+                                            </button>
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+
+                        {/* RIGHT PANEL: Enemy List (Combat) */}
+                        <div className={`lg:w-72 shrink-0 flex flex-col gap-4 ${phase !== 'combat' ? 'hidden lg:flex lg:invisible' : ''}`}>
+                            {phase === 'combat' && (
+                                <div className="bg-gray-800 p-4 rounded border border-gray-600 overflow-y-auto max-h-60 lg:max-h-full">
+                                    <h3 className="text-sm font-bold text-red-400 mb-2 sticky top-0 bg-gray-800">敌人列表 (点击选择目标)</h3>
+                                    <div className="space-y-2">
+                                        {enemies.map((enemy, idx) => (
+                                            <div 
+                                                key={idx}
+                                                onClick={() => setSelectedTargetIndex(idx)}
+                                                className={`p-2 rounded border cursor-pointer transition-colors ${
+                                                    selectedTargetIndex === idx 
+                                                    ? 'bg-red-900/40 border-red-500' 
+                                                    : 'bg-gray-700/50 border-transparent hover:bg-gray-700'
+                                                }`}
+                                            >
+                                                <div className="flex justify-between items-center">
+                                                    <span className={selectedTargetIndex === idx ? "text-red-300 font-bold" : "text-gray-300"}>
+                                                        {enemy.name}
+                                                    </span>
+                                                    <span className="text-xs text-gray-400">HP: {enemy.stats.hp}/{enemy.stats.maxHp}</span>
+                                                </div>
+                                                <div className="w-full bg-gray-900 rounded-full h-1.5 mt-1">
+                                                    <div 
+                                                        className="bg-red-500 h-full rounded-full transition-all duration-500" 
+                                                        style={{ width: `${(enemy.stats.hp / enemy.stats.maxHp) * 100}%` }}
+                                                    ></div>
+                                                </div>
+                                            </div>
+                                        ))}
                                     </div>
                                 </div>
                             )}
                         </div>
+
                     </div>
                 </div>
             );

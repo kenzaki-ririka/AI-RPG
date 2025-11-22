@@ -45,7 +45,8 @@
         const PROVIDERS = {
             GOOGLE: "google",
             OPENAI: "openai",
-            DEEPSEEK: "deepseek"
+            DEEPSEEK: "deepseek",
+            ANTHROPIC: "anthropic"
         };
 
         const AVAILABLE_MODELS = [
@@ -58,6 +59,10 @@
             // DeepSeek Models
             { id: "deepseek-chat", name: "DeepSeek V3 (Chat)", provider: PROVIDERS.DEEPSEEK },
             { id: "deepseek-reasoner", name: "DeepSeek R1 (Reasoner)", provider: PROVIDERS.DEEPSEEK },
+            // Anthropic Models (Simulated Date: Nov 2025)
+            { id: "claude-3-7-sonnet-20250219", name: "Claude 3.7 Sonnet (Latest)", provider: PROVIDERS.ANTHROPIC },
+            { id: "claude-3-5-sonnet-20241022", name: "Claude 3.5 Sonnet", provider: PROVIDERS.ANTHROPIC },
+            { id: "claude-3-opus-20240229", name: "Claude 3 Opus", provider: PROVIDERS.ANTHROPIC },
             // OpenAI / Compatible Models
             { id: "gpt-4o", name: "GPT-4o", provider: PROVIDERS.OPENAI },
             { id: "gpt-4-turbo", name: "GPT-4 Turbo", provider: PROVIDERS.OPENAI },
@@ -110,6 +115,59 @@
                     if (!data.candidates || data.candidates.length === 0) throw new Error("No content generated");
                     const content = data.candidates[0].content.parts[0].text;
                     return jsonMode ? JSON.parse(content) : content;
+
+                } else if (provider === PROVIDERS.ANTHROPIC) {
+                    // --- Anthropic API ---
+                    let url = baseUrl.replace(/\/$/, "");
+                    if (!url.endsWith("/v1/messages")) {
+                        url += "/v1/messages";
+                    }
+
+                    const systemMessage = messages.find(m => m.role === 'system')?.content || "";
+                    const userMessages = messages.filter(m => m.role !== 'system').map(m => ({
+                        role: m.role,
+                        content: m.content
+                    }));
+
+                    const body = {
+                        model: model,
+                        max_tokens: 4096,
+                        system: systemMessage,
+                        messages: userMessages,
+                        temperature: 0.7
+                    };
+
+                    // Note: Anthropic API requires CORS proxy or browser-specific handling
+                    const response = await fetch(url, {
+                        method: "POST",
+                        headers: {
+                            "Content-Type": "application/json",
+                            "x-api-key": apiKey,
+                            "anthropic-version": "2023-06-01",
+                            "anthropic-dangerous-direct-browser-access": "true"
+                        },
+                        body: JSON.stringify(body)
+                    });
+
+                    if (!response.ok) {
+                        const err = await response.json().catch(() => ({}));
+                        throw new Error(err.error?.message || `Anthropic API Error: ${response.status}`);
+                    }
+
+                    const data = await response.json();
+                    const textBlock = data.content.find(b => b.type === 'text');
+                    if (!textBlock) throw new Error("No text content in Anthropic response");
+                    
+                    const content = textBlock.text;
+                    if (jsonMode) {
+                        // Try to find JSON block
+                        const jsonMatch = content.match(/\{[\s\S]*\}/);
+                        if (jsonMatch) {
+                            return JSON.parse(jsonMatch[0]);
+                        }
+                        return JSON.parse(content);
+                    }
+                    return content;
 
                 } else {
                     // --- OpenAI Compatible API (DeepSeek / OpenAI) ---
@@ -377,6 +435,7 @@
                 let newBaseUrl = "";
                 if (newProvider === PROVIDERS.GOOGLE) newBaseUrl = "https://generativelanguage.googleapis.com";
                 else if (newProvider === PROVIDERS.DEEPSEEK) newBaseUrl = "https://api.deepseek.com";
+                else if (newProvider === PROVIDERS.ANTHROPIC) newBaseUrl = "https://api.anthropic.com";
                 else newBaseUrl = "https://api.openai.com/v1";
 
                 setConfig(prev => ({
@@ -400,25 +459,32 @@
                             {/* Provider Selection */}
                             <div>
                                 <label className="block text-sm font-medium mb-1 text-gray-400">AI 提供商 (Provider)</label>
-                                <div className="flex gap-2">
+                                <div className="flex gap-2 flex-wrap">
                                     <button
                                         type="button"
                                         onClick={() => handleProviderChange(PROVIDERS.GOOGLE)}
-                                        className={`flex-1 py-2 rounded border ${config.provider === PROVIDERS.GOOGLE ? 'bg-purple-600 border-purple-500 text-white' : 'bg-gray-700 border-gray-600 text-gray-400 hover:bg-gray-600'}`}
+                                        className={`flex-1 py-2 px-2 rounded border text-xs md:text-sm ${config.provider === PROVIDERS.GOOGLE ? 'bg-purple-600 border-purple-500 text-white' : 'bg-gray-700 border-gray-600 text-gray-400 hover:bg-gray-600'}`}
                                     >
                                         Google
                                     </button>
                                     <button
                                         type="button"
                                         onClick={() => handleProviderChange(PROVIDERS.DEEPSEEK)}
-                                        className={`flex-1 py-2 rounded border ${config.provider === PROVIDERS.DEEPSEEK ? 'bg-blue-600 border-blue-500 text-white' : 'bg-gray-700 border-gray-600 text-gray-400 hover:bg-gray-600'}`}
+                                        className={`flex-1 py-2 px-2 rounded border text-xs md:text-sm ${config.provider === PROVIDERS.DEEPSEEK ? 'bg-blue-600 border-blue-500 text-white' : 'bg-gray-700 border-gray-600 text-gray-400 hover:bg-gray-600'}`}
                                     >
                                         DeepSeek
                                     </button>
                                     <button
                                         type="button"
+                                        onClick={() => handleProviderChange(PROVIDERS.ANTHROPIC)}
+                                        className={`flex-1 py-2 px-2 rounded border text-xs md:text-sm ${config.provider === PROVIDERS.ANTHROPIC ? 'bg-orange-600 border-orange-500 text-white' : 'bg-gray-700 border-gray-600 text-gray-400 hover:bg-gray-600'}`}
+                                    >
+                                        Claude
+                                    </button>
+                                    <button
+                                        type="button"
                                         onClick={() => handleProviderChange(PROVIDERS.OPENAI)}
-                                        className={`flex-1 py-2 rounded border ${config.provider === PROVIDERS.OPENAI ? 'bg-green-600 border-green-500 text-white' : 'bg-gray-700 border-gray-600 text-gray-400 hover:bg-gray-600'}`}
+                                        className={`flex-1 py-2 px-2 rounded border text-xs md:text-sm ${config.provider === PROVIDERS.OPENAI ? 'bg-green-600 border-green-500 text-white' : 'bg-gray-700 border-gray-600 text-gray-400 hover:bg-gray-600'}`}
                                     >
                                         OpenAI
                                     </button>
@@ -463,9 +529,18 @@
                                     value={config.apiKey}
                                     onChange={(e) => setConfig({...config, apiKey: e.target.value})}
                                     className="w-full p-2 rounded bg-gray-700 border border-gray-600 focus:border-purple-500 focus:outline-none text-white"
-                                    placeholder={config.provider === PROVIDERS.GOOGLE ? "AIza..." : "sk-..."}
+                                    placeholder={
+                                        config.provider === PROVIDERS.GOOGLE ? "AIza..." : 
+                                        config.provider === PROVIDERS.ANTHROPIC ? "sk-ant-..." :
+                                        "sk-..."
+                                    }
                                     required
                                 />
+                                {config.provider === PROVIDERS.ANTHROPIC && (
+                                    <p className="text-[10px] text-orange-400 mt-1">
+                                        注意: 直接在浏览器使用 Anthropic Key 可能会因为 CORS 失败。建议使用转发代理地址 (Base URL)。
+                                    </p>
+                                )}
                             </div>
 
                             <button 

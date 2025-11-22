@@ -265,7 +265,7 @@
         };
 
         // --- Unified Game Prompt ---
-        const getGamePrompt = (player, enemies, history, phase, actionData, showNarrative) => {
+        const getGamePrompt = (player, enemies, history, phase, actionData, showNarrative, combatReport = null) => {
             // 1. Construct Chat History
             const chatHistory = history
                 .filter(log => log.type === 'narrative' || log.type === 'combat' || log.type === 'action')
@@ -290,7 +290,7 @@
 
             const systemInstruction = {
                 role: "system",
-                content: `你是一位全能的 RPG 游戏主持人 (Game Master)。你负责主持游戏，包括剧情探索和战斗结算。
+                content: `你是一位RPG 游戏主持人 (Game Master)。你负责主持游戏，包括剧情探索和战斗结算。
                 
                 【当前世界与角色】
                 世界设定: ${player.worldview || "未知"}
@@ -304,15 +304,17 @@
                 【当前状态】
                 模式: ${phase === 'combat' ? '⚔️ 战斗模式' : '🌍 探索模式'}
                 ${phase === 'combat' ? `敌人列表:\n${enemyState}` : ''}
+                ${combatReport ? `\n【系统战报 (已发生的数值结果)】\n${combatReport}\n(请根据上述系统战报生成剧情描述，不要重新计算数值)` : ''}
                 
                 【你的任务】
                 根据用户的行动和当前状态，生成下一阶段的剧情或战斗结果。
                 必须保持上下文连贯性。记得之前的剧情和状态。
+                ${combatReport ? '注意：数值结果已由系统决定，你只需负责描述画面。' : '任务：1. 计算伤害与结果。 2. 管理状态。'}
                 
                 ${phase === 'combat' && !showNarrative ? '请提供简短的战斗总结。' : '请以丰富、引人入胜的小说风格描述结果 (简体中文)。'}
 
                 【JSON 返回格式】
-                仅返回符合此结构的有效 JSON。**仅包含有变化的字段，无变化则省略。**
+                仅返回符合此结构的有效 JSON。**仅包含有变化的字段，无变化则省略。可只包含narrative**
 
                 {
                     "narrative": "string (必须包含)",
@@ -636,7 +638,8 @@
             const [showDice, setShowDice] = useState(false);
             const [diceExpression, setDiceExpression] = useState("1d20");
             const [showInventory, setShowInventory] = useState(false);
-            const [showNarrative, setShowNarrative] = useState(true); // New Toggle
+            const [showNarrative, setShowNarrative] = useState(true); 
+            const [useJsCombat, setUseJsCombat] = useState(false); // New Toggle for JS Combat
 
             const logContainerRef = useRef(null);
             const fileInputRef = useRef(null);
@@ -762,6 +765,52 @@
                 }
             };
 
+            // --- JS Combat Logic ---
+            const calculateDamage = (attacker, defender, skill = null) => {
+                // Base stats
+                const atk = attacker.stats.attack || 10;
+                const def = defender.stats.defense || 0;
+                const speed = attacker.stats.speed || 10;
+                const targetSpeed = defender.stats.speed || 10;
+
+                // Hit chance (simple logic)
+                const hitChance = 0.9 + ((speed - targetSpeed) * 0.01);
+                if (Math.random() > hitChance) return { damage: 0, type: 'miss' };
+
+                // Crit chance
+                const critChance = 0.05 + ((speed - targetSpeed) * 0.005);
+                const isCrit = Math.random() < critChance;
+
+                // Damage Calculation
+                let rawDamage = atk;
+                let multiplier = 1.0;
+
+                if (skill) {
+                    // Skill damage often replaces or adds to ATK. 
+                    // Let's say skill.damage is a power value (e.g. 50 = 1.5x atk, or flat damage)
+                    // For simplicity: if skill.damage > 0, we use it as base power scaling
+                    if (skill.damage > 0) {
+                        // Assume skill.damage 100 = 100% ATK. 50 = 50% ATK? 
+                        // Or skill.damage is flat? Let's treat as flat + scaling
+                        // Hybrid: Skill Dmg + (ATK * 0.5)
+                        rawDamage = skill.damage + (atk * 0.5); 
+                    }
+                }
+
+                // Defense mitigation (simple subtraction with min 1)
+                let damage = Math.max(1, rawDamage - (def * 0.5));
+                
+                if (isCrit) {
+                    damage *= 1.5;
+                }
+
+                return { 
+                    damage: Math.floor(damage), 
+                    type: isCrit ? 'crit' : 'hit',
+                    isCrit 
+                };
+            };
+
             // --- Adventure Phase Handler (Unified) ---
             const handleAdventureAction = async () => {
                 if (processing || !inputAction.trim()) return;
@@ -837,12 +886,93 @@
                 setProcessing(true);
                 addLog(`> ${actionObj.name} (目标: ${enemies[selectedTargetIndex]?.name || '无'})`, 'action');
 
+                let combatReport = null;
+                let jsStatUpdates = { player: {}, enemies: [] }; // Store JS updates to apply later or merge
+
+                // --- JS Combat Execution ---
+                if (useJsCombat && phase === 'combat' && enemies.length > 0) {
+                    const targetIndex = selectedTargetIndex;
+                    const target = enemies[targetIndex];
+                    let reportLines = [];
+
+                    // 1. Player Turn
+                    if (target) {
+                        const result = calculateDamage(player, target, skill);
+                        if (result.type === 'miss') {
+                            reportLines.push(`你攻击 ${target.name}，但是未命中！`);
+                        } else {
+                            const critStr = result.isCrit ? " (暴击!)" : "";
+                            reportLines.push(`你对 ${target.name} 造成了 ${result.damage} 点伤害${critStr}。`);
+                            
+                            // Store update
+                            jsStatUpdates.enemies.push({ index: targetIndex, hpChange: -result.damage });
+                        }
+                    }
+
+                    // 2. Enemy Turn (All alive enemies attack)
+                    // We need to simulate this based on current state minus player damage (if instant)
+                    // But for simplicity, let's calculate based on initial state (simultaneous turns or player first)
+                    // Assuming Player First:
+                    enemies.forEach((e, idx) => {
+                        // Check if enemy is dead after player attack
+                        let currentHp = e.stats.hp;
+                        const pendingDmg = jsStatUpdates.enemies.find(u => u.index === idx)?.hpChange || 0;
+                        if (currentHp + pendingDmg <= 0) {
+                            reportLines.push(`${e.name} 被击败了！`);
+                            return; // Dead enemy doesn't attack
+                        }
+
+                        // Enemy Attack
+                        // Enemy basic attack (no skills for now in JS mode simplified)
+                        const eResult = calculateDamage(e, player, null); 
+                        if (eResult.damage > 0) {
+                             reportLines.push(`${e.name} 攻击你，造成了 ${eResult.damage} 点伤害。`);
+                             jsStatUpdates.player.hp = (jsStatUpdates.player.hp || 0) - eResult.damage;
+                        } else {
+                             reportLines.push(`${e.name} 的攻击未命中。`);
+                        }
+                    });
+
+                    combatReport = reportLines.join("\n");
+                    
+                    // Apply JS Updates Locally Immediately? 
+                    // Or wait for AI to confirm/wrap it?
+                    // Strategy: We send the report to AI. AI is told "System generated these results".
+                    // AI should return JSON reflecting these changes (or we force merge them).
+                    // To ensure consistency, let's APPLY JS updates to the 'tempPlayer' and 'enemies' context passed to AI?
+                    // No, Prompt says "Here is the report", AI should output JSON.
+                    // But AI might hallucinate diff numbers.
+                    // BETTER: We apply JS updates to State AFTER getting AI response, ignoring AI's numbers if JS mode is on?
+                    // OR: We trust AI to copy our numbers?
+                    // Let's try: Pass report to AI. Let AI generate narrative. 
+                    // AND we merge JS updates manually in handleUnifiedResponse or here.
+                    // Let's do the merge manually to be safe against AI math fail.
+                }
+
                 try {
-                    // Unified call: passing 'combat' phase and action object
+                    // Unified call
                     // Note: We pass tempPlayer to reflect cost deduction
-                    const messages = getGamePrompt(tempPlayer, enemies, logs, 'combat', { ...actionObj, targetIndex: selectedTargetIndex }, showNarrative);
+                    const messages = getGamePrompt(tempPlayer, enemies, logs, 'combat', { ...actionObj, targetIndex: selectedTargetIndex }, showNarrative, combatReport);
                     const result = await callAI(config, messages);
                     
+                    // If JS Combat, override AI's numeric updates with JS calculations to be safe
+                    if (useJsCombat && combatReport) {
+                        // Override Player HP change
+                        if (!result.playerStatChanges) result.playerStatChanges = {};
+                        if (jsStatUpdates.player.hp) {
+                            result.playerStatChanges.hp = jsStatUpdates.player.hp;
+                        }
+                        
+                        // Override Enemy Updates
+                        if (jsStatUpdates.enemies.length > 0) {
+                            result.enemiesUpdates = jsStatUpdates.enemies.map(u => ({
+                                index: u.index,
+                                hpChange: u.hpChange,
+                                damageTaken: -u.hpChange
+                            }));
+                        }
+                    }
+
                     handleUnifiedResponse(result);
 
                 } catch (error) {
@@ -1303,7 +1433,7 @@
                                     // Combat Controls
                                     <div className="space-y-3">
                                         <div className="flex justify-between items-center text-xs text-gray-400 uppercase tracking-wider">
-                                            <div className="flex items-center gap-2">
+                                            <div className="flex items-center gap-3">
                                                 <span>战斗模式</span>
                                                 <label className="flex items-center gap-1 cursor-pointer hover:text-gray-300" title="开启/关闭 AI 战斗解说">
                                                      <input 
@@ -1313,6 +1443,15 @@
                                                         className="accent-purple-500" 
                                                     />
                                                      <span>解说</span>
+                                                </label>
+                                                <label className="flex items-center gap-1 cursor-pointer hover:text-gray-300 text-blue-400" title="使用 JavaScript 进行确定性伤害计算，而非 AI 估算">
+                                                     <input 
+                                                        type="checkbox" 
+                                                        checked={useJsCombat} 
+                                                        onChange={(e) => setUseJsCombat(e.target.checked)} 
+                                                        className="accent-blue-500" 
+                                                    />
+                                                     <span>JS伤害</span>
                                                 </label>
                                             </div>
                                             <div className="flex gap-2 items-center">

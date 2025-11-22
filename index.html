@@ -264,68 +264,71 @@
             ];
         };
 
-        // Prompt for Adventure Phase (Exploration)
-        const getAdventurePrompt = (player, history, action) => {
-            // Convert existing logs (history) into valid chat message objects
-            // Map 'narrative' logs to 'model' role, and others to 'user' (or skip system logs)
+        // --- Unified Game Prompt ---
+        const getGamePrompt = (player, enemies, history, phase, actionData, showNarrative) => {
+            // 1. Construct Chat History
             const chatHistory = history
-                .filter(log => log.type === 'narrative' || log.type === 'action') // Only take narrative (AI) and action (User)
+                .filter(log => log.type === 'narrative' || log.type === 'combat' || log.type === 'action')
                 .map(log => {
-                    if (log.type === 'narrative') {
+                    // Combine narrative and combat logs into 'model' role
+                    if (log.type === 'narrative' || log.type === 'combat') {
                         return { role: "model", content: log.text };
                     } else {
-                        // log.type === 'action' (User input)
-                        // Remove the "> " prefix if present for cleaner history
+                        // User action
                         const cleanText = log.text.startsWith("> ") ? log.text.substring(2) : log.text;
                         return { role: "user", content: cleanText };
                     }
                 });
 
-            // System instruction serves as the "persona" definition
-             const systemInstruction = {
+            // 2. Construct System Context
+            const enemyState = enemies.length > 0 
+                ? enemies.map((e, i) => `[${i}] ${e.name} (HP ${e.stats.hp}/${e.stats.maxHp}, 特性: ${e.traits ? e.traits.map(t => t.name).join(",") : "无"})`).join("\n")
+                : "当前无敌人";
+
+            const playerSkills = player.skills.map(s => `${s.name} (${s.type}, ${s.cost}${s.costType})`).join(", ");
+            const playerBuffs = player.buffs ? JSON.stringify(player.buffs) : "无";
+
+            const systemInstruction = {
                 role: "system",
-                content: `你是一位 RPG 游戏主持人 (DM)。玩家正在探索世界。
+                content: `你是一位全能的 RPG 游戏主持人 (Game Master)。你负责主持游戏，包括剧情探索和战斗结算。
+                
+                【当前世界与角色】
+                世界设定: ${player.worldview || "未知"}
                 当前玩家: ${player.name} (${player.class}).
+                背景故事: ${player.description || "未知"}
                 属性: ${JSON.stringify(player.stats)}.
-                技能: ${JSON.stringify(player.skills)}.
+                技能: ${playerSkills}
+                Buffs: ${playerBuffs}
                 物品栏: ${JSON.stringify(player.items || [])}.
                 
-                用户执行了一个行动。请以丰富、引人入胜的小说风格描述结果。
+                【当前状态】
+                模式: ${phase === 'combat' ? '⚔️ 战斗模式' : '🌍 探索模式'}
+                ${phase === 'combat' ? `敌人列表:\n${enemyState}` : ''}
                 
-                风格指南：
-                - 使用感官细节（玩家看到了什么、听到了什么、闻到了什么？）。
-                - 描述要详尽而不是简略（3-5段比较合适）。
-                - 为玩家接下来的行动提供清晰的引导或“钩子”。
+                【你的任务】
+                根据用户的行动和当前状态，生成下一阶段的剧情或战斗结果。
+                必须保持上下文连贯性。记得之前的剧情和状态。
                 
-                如果用户行动暗示了学习、升级或遗忘技能（例如“我研读了那本古籍”、“我练习剑术”），你可以修改他们的技能。
+                ${phase === 'combat' && !showNarrative ? '请提供简短的战斗总结。' : '请以丰富、引人入胜的小说风格描述结果 (简体中文)。'}
 
-                重要提示：叙述必须使用简体中文。
-                
-                仅返回符合此结构的有效 JSON。
-                **关键规则：字段仅在有内容时返回。如果列表为空或没有变化，请完全省略该字段（除了 narrative）。**
+                【JSON 返回格式】
+                仅返回符合此结构的有效 JSON。**仅包含有变化的字段，无变化则省略。**
 
                 {
-                    "narrative": "string (必须包含。长篇描述性叙述)",
-                    "statChanges": { "hp": number, ... }, // 可选：仅在属性变化时包含
-                    "newItems": [ // 可选：仅在获得物品时包含
-                        { "name": "string", "type": "consumable"|"equipment"|"material", "effect": { "hp": number, "mp": number }, "count": number, "description": "string" }
-                    ],
-                    "removedItems": ["string"], // 可选
-                    "newSkills": [ // 可选：仅在习得新技能时包含
-                            { 
-                            "name": "string", 
-                            "type": "active"|"passive", 
-                            "damage": number, 
-                            "cost": number, 
-                            "costType": "mp"|"stamina", 
-                            "target": "single"|"aoe"|"self", 
-                            "statusEffects": ["string"],
-                            "description": "string" 
-                        }
-                    ],
-                    "removedSkills": ["string"], // 可选
-                    "updatedSkills": [ ... ], // 可选
-                    "newEnemies": [ // 可选：仅在战斗触发时包含
+                    "narrative": "string (必须包含)",
+                    
+                    // --- 状态更新 (通用) ---
+                    "statChanges": { "hp": number, "mp": number, ... }, 
+                    "newItems": [ { "name": "string", "type": "string", "count": number, ... } ],
+                    "removedItems": ["string"],
+                    "newSkills": [ { "name": "string", "type": "active"|"passive", "damage": number, "cost": number, ... } ],
+                    "updatedSkills": [ ... ],
+                    "removedSkills": ["string"],
+                    "buffsAdded": [ { "name": "string", "effect": "string", "duration": number, "description": "string", "type": "buff"|"debuff" } ],
+                    "buffsRemoved": ["string"],
+
+                    // --- 战斗/世界更新 ---
+                    "newEnemies": [ // 仅在触发新战斗时
                         { 
                             "name": "string", 
                             "stats": { "hp": number, "maxHp": number, "attack": number, "defense": number, "speed": number },
@@ -333,66 +336,8 @@
                             "traits": [ { "name": "string", "effect": "string", "description": "string" } ],
                             "description": "string"
                         }
-                    ]
-                }
-                `
-            };
-
-            const latestUserMessage = {
-                role: "user",
-                content: `玩家行动: ${action}`
-            };
-
-            return [systemInstruction, ...chatHistory, latestUserMessage];
-        };
-
-        // Prompt for Combat Phase (Multi-Enemy)
-        const getCombatPrompt = (player, enemies, action, targetIndex, history, showNarrative) => {
-            // Similar logic for combat history, though combat logs might be messy.
-            // We'll extract combat narratives and actions.
-             const chatHistory = history
-                .filter(log => log.type === 'combat' || log.type === 'action')
-                .map(log => {
-                     if (log.type === 'combat') {
-                        return { role: "model", content: log.text };
-                    } else {
-                         const cleanText = log.text.startsWith("> ") ? log.text.substring(2) : log.text;
-                        return { role: "user", content: cleanText };
-                    }
-                });
-            
-            const enemyState = enemies.map((e, i) => {
-                const traits = e.traits ? e.traits.map(t => t.name).join(",") : "";
-                return `[${i}] ${e.name} (HP ${e.stats.hp}/${e.stats.maxHp}, 特性: ${traits})`;
-            }).join("\n");
-            
-            const playerSkills = player.skills.map(s => `${s.name} (${s.type}, ${s.cost}${s.costType})`).join(", ");
-            const playerBuffs = player.buffs ? JSON.stringify(player.buffs) : "无";
-
-            const systemInstruction = {
-                role: "system",
-                content: `你是一位 RPG 战斗解说员。
-                玩家: ${player.name} (HP ${player.stats.hp}/${player.stats.maxHp}, MP ${player.stats.mp}/${player.stats.maxMp}).
-                玩家技能: ${playerSkills}
-                玩家 Buffs: ${playerBuffs}
-                
-                敌人:
-                ${enemyState}
-                
-                任务:
-                1. 计算玩家造成的伤害（考虑 Buffs、敌人特性如防御/反伤）。
-                2. 计算敌人回合（敌人攻击玩家，考虑他们的技能/特性）。
-                3. 管理 Buffs/Debuffs（持续时间减少，有些可能过期）。
-                
-                ${showNarrative ? "提供生动的战斗描述。" : "提供非常简短的总结。"}
-                
-                仅返回符合此结构的有效 JSON。
-                **关键规则：字段仅在有内容时返回。如果没有变化或列表为空，请完全省略该字段（narrative 除外）。**
-
-                {
-                    "narrative": "string (必须包含)",
-                    "playerStatChanges": { "hp": number, ... }, // 可选：仅在变化时包含
-                    "enemiesUpdates": [ // 可选：仅在敌人状态变化时包含
+                    ],
+                    "enemiesUpdates": [ // 仅在战斗中敌人状态变化时
                         { 
                             "index": number, 
                             "damageTaken": number, 
@@ -401,20 +346,24 @@
                             "statusRemoved": "string"
                         }
                     ],
-                    "playerBuffsAdded": [ // 可选
-                            { "name": "string", "effect": "string", "duration": number, "description": "string", "type": "buff"|"debuff" }
-                    ],
-                    "playerBuffsRemoved": ["string"], // 可选
-                    "enemyBuffsAdded": [ // 可选
-                            { "enemyIndex": number, "buff": { "name": "string", "description": "string", "duration": number } }
+                    "enemyBuffsAdded": [
+                         { "enemyIndex": number, "buff": { "name": "string", "description": "string", "duration": number } }
                     ]
                 }
                 `
             };
 
+            // 3. Construct Current User Message
+            let userContent = "";
+            if (phase === 'combat') {
+                userContent = `【战斗回合】\n玩家行动: ${JSON.stringify(actionData)}`;
+            } else {
+                userContent = `【探索行动】\n玩家: ${actionData}`;
+            }
+
             const latestUserMessage = {
                 role: "user",
-                content: `行动: ${JSON.stringify(action)}\n目标索引: ${targetIndex}\n执行战斗回合。`
+                content: userContent
             };
 
             return [systemInstruction, ...chatHistory, latestUserMessage];
@@ -618,6 +567,9 @@
                 try {
                     const messages = getCharGenPrompt(worldview, description);
                     const charData = await callAI(config, messages);
+                    // Attach world settings to character data for future reference
+                    charData.worldview = worldview;
+                    charData.description = description;
                     onCharacterCreated(charData);
                 } catch (error) {
                     alert("生成角色失败: " + error.message);
@@ -810,7 +762,7 @@
                 }
             };
 
-            // --- Adventure Phase Handler ---
+            // --- Adventure Phase Handler (Unified) ---
             const handleAdventureAction = async () => {
                 if (processing || !inputAction.trim()) return;
                 const action = inputAction.trim();
@@ -819,94 +771,12 @@
                 addLog(`> ${action}`, 'action');
 
                 try {
-                    const messages = getAdventurePrompt(player, logs, action);
+                    // Unified call: passing 'adventure' phase and empty enemy list (or current if any)
+                    const messages = getGamePrompt(player, enemies, logs, 'adventure', action, showNarrative);
                     const result = await callAI(config, messages);
                     
-                    addLog(result.narrative, 'narrative');
-
-                    // Handle Stat Changes (Healing/Items)
-                    setPlayer(prev => {
-                        let newStats = { ...prev.stats };
-                        let newItems = prev.items ? [...prev.items] : [];
-
-                        if (result.statChanges) {
-                            Object.entries(result.statChanges).forEach(([key, value]) => {
-                                if (typeof newStats[key] !== 'undefined') {
-                                    newStats[key] = newStats[key] + value;
-                                    const maxKey = "max" + key.charAt(0).toUpperCase() + key.slice(1);
-                                    if (typeof newStats[maxKey] !== 'undefined') {
-                                        newStats[key] = Math.min(newStats[key], newStats[maxKey]);
-                                    }
-                                    newStats[key] = Math.max(0, newStats[key]);
-                                }
-                            });
-                        }
-
-                        // Handle New Items
-                        if (result.newItems) {
-                            result.newItems.forEach(newItem => {
-                                const existingItemIndex = newItems.findIndex(i => i.name === newItem.name);
-                                if (existingItemIndex >= 0) {
-                                    newItems[existingItemIndex].count += newItem.count;
-                                } else {
-                                    newItems.push(newItem);
-                                }
-                                addLog(`获得物品: ${newItem.name} x${newItem.count}`, 'success');
-                            });
-                        }
-
-                        // Handle Removed Items
-                        if (result.removedItems) {
-                            result.removedItems.forEach(remName => {
-                                const idx = newItems.findIndex(i => i.name === remName);
-                                if (idx >= 0) {
-                                    newItems[idx].count--;
-                                    if (newItems[idx].count <= 0) newItems.splice(idx, 1);
-                                }
-                            });
-                        }
-
-                        // Handle New/Removed/Updated Skills
-                        let newSkillsList = prev.skills ? [...prev.skills] : [];
-                        
-                        if (result.newSkills) {
-                            result.newSkills.forEach(skill => {
-                                if (!newSkillsList.find(s => s.name === skill.name)) {
-                                    newSkillsList.push(skill);
-                                    addLog(`💡 习得新技能: ${skill.name}`, 'success');
-                                }
-                            });
-                        }
-
-                        if (result.updatedSkills) {
-                             result.updatedSkills.forEach(skill => {
-                                const idx = newSkillsList.findIndex(s => s.name === skill.name);
-                                if (idx >= 0) {
-                                    newSkillsList[idx] = skill;
-                                    addLog(`🆙 技能升级: ${skill.name}`, 'success');
-                                }
-                            });
-                        }
-
-                        if (result.removedSkills) {
-                            result.removedSkills.forEach(name => {
-                                const idx = newSkillsList.findIndex(s => s.name === name);
-                                if (idx >= 0) {
-                                    newSkillsList.splice(idx, 1);
-                                    addLog(`❌ 遗忘技能: ${name}`, 'neutral');
-                                }
-                            });
-                        }
-
-                        return { ...prev, stats: newStats, items: newItems, skills: newSkillsList };
-                    });
-
-                    if (result.newEnemies && result.newEnemies.length > 0) {
-                        setEnemies(result.newEnemies);
-                        setPhase('combat');
-                        setSelectedTargetIndex(0);
-                        addLog(`⚠️ 遭遇敌袭！出现 ${result.newEnemies.length} 个敌人！`, 'danger');
-                    }
+                    // Handle the Unified Response
+                    handleUnifiedResponse(result);
 
                 } catch (error) {
                     addLog(`错误: ${error.message}`, 'danger');
@@ -915,13 +785,12 @@
                 }
             };
 
-            // --- Combat Phase Handler ---
+            // --- Combat Phase Handler (Unified) ---
             const handleCombatAction = async (actionType, skill = null) => {
                 if (processing || player.stats.hp <= 0) return;
                 
                 // Construct action object (Skill or Custom Text)
                 let actionObj = {};
-                let costDeduced = false;
                 let tempPlayer = { ...player }; // Mutable copy for prompt generation
 
                 if (skill) {
@@ -946,7 +815,6 @@
                                     [statKey]: prev.stats[statKey] - skill.cost
                                 }
                             }));
-                            costDeduced = true;
                             // Update tempPlayer for AI context so it knows current resources
                             tempPlayer.stats = { ...player.stats, [statKey]: player.stats[statKey] - skill.cost };
                         }
@@ -970,136 +838,221 @@
                 addLog(`> ${actionObj.name} (目标: ${enemies[selectedTargetIndex]?.name || '无'})`, 'action');
 
                 try {
-                    const messages = getCombatPrompt(tempPlayer, enemies, actionObj, selectedTargetIndex, logs, showNarrative);
+                    // Unified call: passing 'combat' phase and action object
+                    // Note: We pass tempPlayer to reflect cost deduction
+                    const messages = getGamePrompt(tempPlayer, enemies, logs, 'combat', { ...actionObj, targetIndex: selectedTargetIndex }, showNarrative);
                     const result = await callAI(config, messages);
                     
-                    // Update State based on AI calculation
-                    
-                    // 1. Handle Enemy Updates
-                    let newEnemies = [...enemies];
-                    if (result.enemiesUpdates) {
-                        result.enemiesUpdates.forEach(update => {
-                            if (newEnemies[update.index]) {
-                                const e = newEnemies[update.index];
-                                
-                                // Update HP
-                                if (update.hpChange !== undefined) {
-                                    e.stats.hp = Math.max(0, Math.min(e.stats.maxHp, e.stats.hp + update.hpChange));
-                                } else if (update.damageTaken !== undefined) {
-                                    e.stats.hp = Math.max(0, e.stats.hp - update.damageTaken);
-                                }
+                    handleUnifiedResponse(result);
 
-                                // Handle Status/Buffs (Initialize if needed)
-                                if (!e.buffs) e.buffs = [];
-                                
-                                if (update.statusAdded) {
-                                    // Simple status string support for now, or expand to object
-                                    if (!e.buffs.find(b => b.name === update.statusAdded)) {
-                                        e.buffs.push({ name: update.statusAdded, duration: 3 }); // Default duration if not specified
-                                    }
-                                }
-                                if (update.statusRemoved) {
-                                    e.buffs = e.buffs.filter(b => b.name !== update.statusRemoved);
-                                }
-                            }
-                        });
-                    }
-                    
-                    // 2. Handle Enemy Buffs (Explicit Object)
-                    if (result.enemyBuffsAdded) {
-                        result.enemyBuffsAdded.forEach(item => {
-                            if (newEnemies[item.enemyIndex]) {
-                                if (!newEnemies[item.enemyIndex].buffs) newEnemies[item.enemyIndex].buffs = [];
-                                newEnemies[item.enemyIndex].buffs.push(item.buff);
-                            }
-                        });
-                    }
+                } catch (error) {
+                    addLog(`错误: ${error.message}`, 'danger');
+                } finally {
+                    setProcessing(false);
+                }
+            };
 
-                    // 3. Handle Player Updates
-                    let playerStatUpdates = {};
-                    if (result.playerStatChanges) {
-                        playerStatUpdates = result.playerStatChanges;
-                    } else if (result.playerDamageTaken) {
-                        playerStatUpdates.hp = -result.playerDamageTaken;
-                    }
+            // --- Unified Response Handler ---
+            const handleUnifiedResponse = (result) => {
+                // 1. Narrative
+                if (result.narrative) {
+                    addLog(result.narrative, phase === 'combat' ? 'combat' : 'narrative');
+                }
 
-                    setPlayer(prev => {
-                        const newStats = { ...prev.stats };
-                        let newBuffs = prev.buffs ? [...prev.buffs] : [];
+                // 2. Player Updates (Stats, Items, Skills, Buffs)
+                setPlayer(prev => {
+                    let newStats = { ...prev.stats };
+                    let newItems = prev.items ? [...prev.items] : [];
+                    let newSkillsList = prev.skills ? [...prev.skills] : [];
+                    let newBuffs = prev.buffs ? [...prev.buffs] : [];
 
-                        // Apply Stat Changes
-                        Object.entries(playerStatUpdates).forEach(([key, value]) => {
+                    // Stats
+                    if (result.statChanges) {
+                        Object.entries(result.statChanges).forEach(([key, value]) => {
                             if (typeof newStats[key] !== 'undefined') {
                                 newStats[key] += value;
                                 const maxKey = "max" + key.charAt(0).toUpperCase() + key.slice(1);
                                 if (typeof newStats[maxKey] !== 'undefined') {
                                     newStats[key] = Math.min(newStats[key], newStats[maxKey]);
                                 }
-                                newStats[key] = Math.max(0, newStats[key]); // No negative stats
+                                newStats[key] = Math.max(0, newStats[key]);
                             }
                         });
-
-                        // Apply Buffs
-                        if (result.playerBuffsAdded) {
-                            result.playerBuffsAdded.forEach(buff => {
-                                newBuffs.push(buff);
-                                addLog(`🔼 获得状态: ${buff.name} (${buff.description})`, 'success');
-                            });
-                        }
-                        if (result.playerBuffsRemoved) {
-                            result.playerBuffsRemoved.forEach(name => {
-                                newBuffs = newBuffs.filter(b => b.name !== name);
-                                addLog(`🔽 状态消失: ${name}`, 'neutral');
-                            });
-                        }
-                        
-                        // Decrement Buff Duration (Optional: could be done by AI, but safe to do here too if AI doesn't return list)
-                        // Actually, AI instruction says "Manage Buffs... duration decreases". 
-                        // So we expect AI to tell us if something is removed. 
-                        // If AI doesn't send "updatedBuffs", we might need to decrement locally?
-                        // Let's assume AI handles removal via 'playerBuffsRemoved'. 
-                        // To be safe, maybe we should update duration if AI sends full list?
-                        // For now, trust AI to send 'playerBuffsRemoved'.
-                        
-                        return { ...prev, stats: newStats, buffs: newBuffs };
-                    });
-
-                    if (showNarrative && result.narrative) {
-                        addLog(result.narrative, 'combat');
-                    } else if (!showNarrative && result.narrative) {
-                         // Maybe log a short summary or nothing?
-                         // addLog("(Combat occurred...)", 'action');
+                    }
+                    // Also handle 'playerStatChanges' alias if AI uses old format occasionally
+                    if (result.playerStatChanges) {
+                         Object.entries(result.playerStatChanges).forEach(([key, value]) => {
+                            if (typeof newStats[key] !== 'undefined') {
+                                newStats[key] += value;
+                                newStats[key] = Math.max(0, newStats[key]);
+                            }
+                        });
                     }
 
-                    // 4. Check for Deaths
-                    const aliveEnemies = newEnemies.filter(e => e.stats.hp > 0);
+                    // Items
+                    if (result.newItems) {
+                        result.newItems.forEach(newItem => {
+                            const existingItemIndex = newItems.findIndex(i => i.name === newItem.name);
+                            if (existingItemIndex >= 0) {
+                                newItems[existingItemIndex].count += newItem.count;
+                            } else {
+                                newItems.push(newItem);
+                            }
+                            addLog(`获得物品: ${newItem.name} x${newItem.count}`, 'success');
+                        });
+                    }
+                    if (result.removedItems) {
+                        result.removedItems.forEach(remName => {
+                            const idx = newItems.findIndex(i => i.name === remName);
+                            if (idx >= 0) {
+                                newItems[idx].count--;
+                                if (newItems[idx].count <= 0) newItems.splice(idx, 1);
+                            }
+                        });
+                    }
+
+                    // Skills
+                    if (result.newSkills) {
+                        result.newSkills.forEach(skill => {
+                            if (!newSkillsList.find(s => s.name === skill.name)) {
+                                newSkillsList.push(skill);
+                                addLog(`💡 习得新技能: ${skill.name}`, 'success');
+                            }
+                        });
+                    }
+                    if (result.updatedSkills) {
+                         result.updatedSkills.forEach(skill => {
+                            const idx = newSkillsList.findIndex(s => s.name === skill.name);
+                            if (idx >= 0) {
+                                newSkillsList[idx] = skill;
+                                addLog(`🆙 技能升级: ${skill.name}`, 'success');
+                            }
+                        });
+                    }
+                    if (result.removedSkills) {
+                        result.removedSkills.forEach(name => {
+                            const idx = newSkillsList.findIndex(s => s.name === name);
+                            if (idx >= 0) {
+                                newSkillsList.splice(idx, 1);
+                                addLog(`❌ 遗忘技能: ${name}`, 'neutral');
+                            }
+                        });
+                    }
+
+                    // Buffs
+                    if (result.buffsAdded) {
+                        result.buffsAdded.forEach(buff => {
+                            newBuffs.push(buff);
+                            addLog(`🔼 获得状态: ${buff.name} (${buff.description})`, 'success');
+                        });
+                    }
+                    // Alias for combat prompt
+                    if (result.playerBuffsAdded) {
+                        result.playerBuffsAdded.forEach(buff => {
+                            newBuffs.push(buff);
+                            addLog(`🔼 获得状态: ${buff.name} (${buff.description})`, 'success');
+                        });
+                    }
+
+                    if (result.buffsRemoved) {
+                        result.buffsRemoved.forEach(name => {
+                            newBuffs = newBuffs.filter(b => b.name !== name);
+                            addLog(`🔽 状态消失: ${name}`, 'neutral');
+                        });
+                    }
+                     if (result.playerBuffsRemoved) {
+                        result.playerBuffsRemoved.forEach(name => {
+                            newBuffs = newBuffs.filter(b => b.name !== name);
+                            addLog(`🔽 状态消失: ${name}`, 'neutral');
+                        });
+                    }
+
+                    return { ...prev, stats: newStats, items: newItems, skills: newSkillsList, buffs: newBuffs };
+                });
+
+                // 3. World/Enemy Updates
+                let currentEnemies = [...enemies];
+                
+                // New Enemies (Trigger Combat)
+                if (result.newEnemies && result.newEnemies.length > 0) {
+                    setEnemies(result.newEnemies);
+                    setPhase('combat');
+                    setSelectedTargetIndex(0);
+                    addLog(`⚠️ 遭遇敌袭！出现 ${result.newEnemies.length} 个敌人！`, 'danger');
+                    // Reset currentEnemies for further updates in this same tick (unlikely but safe)
+                    currentEnemies = result.newEnemies;
+                }
+
+                // Existing Enemy Updates
+                if (result.enemiesUpdates) {
+                    result.enemiesUpdates.forEach(update => {
+                        if (currentEnemies[update.index]) {
+                            const e = currentEnemies[update.index];
+                            
+                            // Update HP
+                            if (update.hpChange !== undefined) {
+                                e.stats.hp = Math.max(0, Math.min(e.stats.maxHp, e.stats.hp + update.hpChange));
+                            } else if (update.damageTaken !== undefined) {
+                                e.stats.hp = Math.max(0, e.stats.hp - update.damageTaken);
+                            }
+
+                            // Handle Status
+                            if (!e.buffs) e.buffs = [];
+                            if (update.statusAdded && !e.buffs.find(b => b.name === update.statusAdded)) {
+                                e.buffs.push({ name: update.statusAdded, duration: 3 });
+                            }
+                            if (update.statusRemoved) {
+                                e.buffs = e.buffs.filter(b => b.name !== update.statusRemoved);
+                            }
+                        }
+                    });
+                }
+
+                // Enemy Buffs
+                if (result.enemyBuffsAdded) {
+                     result.enemyBuffsAdded.forEach(item => {
+                        if (currentEnemies[item.enemyIndex]) {
+                            if (!currentEnemies[item.enemyIndex].buffs) currentEnemies[item.enemyIndex].buffs = [];
+                            currentEnemies[item.enemyIndex].buffs.push(item.buff);
+                        }
+                    });
+                }
+                
+                // 4. Check Deaths / Combat End
+                // Use setEnemies to trigger re-render with updated state
+                const aliveEnemies = currentEnemies.filter(e => e.stats.hp > 0);
+                
+                // Only update enemies list if we are in combat or just entered it
+                if (phase === 'combat' || (result.newEnemies && result.newEnemies.length > 0)) {
                     setEnemies(aliveEnemies);
                     
+                    if (aliveEnemies.length === 0 && phase === 'combat' && (!result.newEnemies || result.newEnemies.length === 0)) {
+                         addLog("🏆 战斗胜利！", 'success');
+                         // Clean up combat buffs
+                         setPlayer(prev => ({
+                            ...prev,
+                            buffs: (prev.buffs || []).filter(b => b.duration === -1 || b.permanent) 
+                        }));
+                        setPhase('adventure');
+                    }
+                    
+                    // Update target index
                     if (selectedTargetIndex >= aliveEnemies.length) {
                         setSelectedTargetIndex(Math.max(0, aliveEnemies.length - 1));
                     }
+                }
 
-                    // Check Player Death (Estimate based on current state + updates)
-                    // Since setPlayer is async, we use the values we calculated.
-                    let currentHp = player.stats.hp;
-                    if (playerStatUpdates.hp) currentHp += playerStatUpdates.hp;
-                    
-                    if (aliveEnemies.length === 0) {
-                        addLog("🏆 战斗胜利！", 'success');
-                        // Clean up temporary combat buffs
-                         setPlayer(prev => ({
-                            ...prev,
-                            buffs: (prev.buffs || []).filter(b => b.duration === -1 || b.permanent) // Remove non-permanent
-                        }));
-                        setPhase('adventure');
-                    } else if (currentHp <= 0) {
-                        addLog("💀 你被打败了...", 'danger');
-                    }
-
-                } catch (error) {
-                    addLog(`错误: ${error.message}`, 'danger');
-                } finally {
-                    setProcessing(false);
+                // Check Player Death
+                // We need to check the *next* state of player, which we just scheduled via setPlayer.
+                // Since we can't access it immediately, we approximate with result.statChanges
+                // Or we can just trust the user will see 0 HP on next render. 
+                // But let's add a log if it looks fatal.
+                let hpChange = 0;
+                if (result.statChanges?.hp) hpChange += result.statChanges.hp;
+                if (result.playerStatChanges?.hp) hpChange += result.playerStatChanges.hp;
+                
+                if (player.stats.hp + hpChange <= 0) {
+                     addLog("💀 你被打败了...", 'danger');
                 }
             };
 

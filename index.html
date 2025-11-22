@@ -213,53 +213,53 @@
             return [
                 {
                     role: "system",
-                    content: `You are a creative RPG Game Master. Create a character based on the user's input.
-                    IMPORTANT: All user-facing strings (name, class, skills description, story) MUST be in Simplified Chinese (简体中文).
+                    content: `你是一位富有创造力的 RPG 游戏主持人 (GM)。请根据用户的输入创建一个角色。
+                    重要提示：所有面向用户的文本（姓名、职业、技能描述、故事）必须使用简体中文。
                     
-                    Return ONLY valid JSON matching this structure:
+                    仅返回符合此结构的有效 JSON：
                     {
-                        "name": "string (Chinese Name)",
-                        "class": "string (Chinese Class)",
+                        "name": "string (中文名)",
+                        "class": "string (中文职业名)",
                         "stats": { 
                             "hp": number (50-500), 
-                            "maxHp": number (same as hp), 
+                            "maxHp": number (同 hp), 
                             "mp": number (0-200), 
-                            "maxMp": number (same as mp),
+                            "maxMp": number (同 mp),
                             "stamina": number (0-100),
-                            "maxStamina": number (same as stamina),
+                            "maxStamina": number (同 stamina),
                             "attack": number (10-100), 
                             "defense": number (5-50), 
                             "speed": number (5-50) 
-                            // Add other relevant stats based on description
+                            // 根据描述添加其他相关属性
                         },
                         "skills": [
                             { 
-                                "name": "string (Chinese Skill Name)", 
+                                "name": "string (中文技能名)", 
                                 "type": "active"|"passive", 
-                                "damage": number (0-100, 0 for passive/buff), 
+                                "damage": number (0-100, 被动/增益技能为0), 
                                 "cost": number (0-50), 
                                 "costType": "mp"|"stamina"|"energy"|"none", 
                                 "target": "single"|"aoe"|"self"|"all_enemies", 
-                                "statusEffects": ["string (e.g. 'burn', 'freeze', 'poison', 'stun', 'disarm', 'bind')"],
-                                "description": "string (Chinese)" 
+                                "statusEffects": ["string (如 'burn', 'freeze', 'poison', 'stun', 'disarm', 'bind')"],
+                                "description": "string (中文描述)" 
                             }
                         ],
                         "items": [
-                            { "name": "string (Chinese Name)", "type": "consumable"|"equipment"|"material", "effect": { "hp": number, "mp": number }, "count": number, "description": "string" }
+                            { "name": "string (中文物品名)", "type": "consumable"|"equipment"|"material", "effect": { "hp": number, "mp": number }, "count": number, "description": "string" }
                         ],
-                        "story": "string (Rich backstory in Chinese)"
+                        "story": "string (丰富的中文背景故事)"
                     }
                     
-                    Guidance:
-                    - Create 4 to 8 skills depending on the class complexity.
-                    - Include diverse mechanics: Damage, Heals, Buffs, Debuffs.
-                    - Include 1-2 Passive skills if appropriate.
-                    - Give the character 3-5 starting items (e.g. Health Potion, Rations, Map, Weapon).
-                    - Ensure resource costs match the stats provided.`
+                    指导方针：
+                    - 根据职业复杂程度创建 4 到 8 个技能。
+                    - 包含多样化的机制：伤害、治疗、增益 (Buffs)、减益 (Debuffs)。
+                    - 如果合适，包含 1-2 个被动技能。
+                    - 给角色 3-5 个初始物品（例如：生命药水、口粮、地图、武器）。
+                    - 确保资源消耗与提供的属性相匹配。`
                 },
                 {
                     role: "user",
-                    content: `World Setting: ${worldview}\nCharacter Description: ${description}`
+                    content: `世界设定: ${worldview}\n角色描述: ${description}`
                 }
             ];
         };
@@ -270,31 +270,31 @@
              return [
                 {
                     role: "system",
-                    content: `You are an RPG Game Master (DM). The player is exploring the world.
-                    Current Player: ${player.name} (${player.class}).
-                    Stats: ${JSON.stringify(player.stats)}.
-                    Skills: ${JSON.stringify(player.skills)}.
-                    Inventory: ${JSON.stringify(player.items || [])}.
+                    content: `你是一位 RPG 游戏主持人 (DM)。玩家正在探索世界。
+                    当前玩家: ${player.name} (${player.class}).
+                    属性: ${JSON.stringify(player.stats)}.
+                    技能: ${JSON.stringify(player.skills)}.
+                    物品栏: ${JSON.stringify(player.items || [])}.
                     
-                    The user performs an action. Describe the outcome in a RICH, ENGAGING, NOVEL-LIKE STYLE.
+                    用户执行了一个行动。请以丰富、引人入胜的小说风格描述结果。
                     
-                    Style Guidelines:
-                    - Use sensory details (what does the player see, hear, smell?).
-                    - Be verbose rather than brief (3-5 paragraphs is good).
-                    - Provide clear guidance or "hooks" for what the player can do next.
+                    风格指南：
+                    - 使用感官细节（玩家看到了什么、听到了什么、闻到了什么？）。
+                    - 描述要详尽而不是简略（3-5段比较合适）。
+                    - 为玩家接下来的行动提供清晰的引导或“钩子”。
                     
-                    If the user action implies learning, upgrading, or forgetting skills (e.g. "I study the tome", "I practice swordplay"), you can modify their skills.
+                    如果用户行动暗示了学习、升级或遗忘技能（例如“我研读了那本古籍”、“我练习剑术”），你可以修改他们的技能。
 
-                    IMPORTANT: Narrative MUST be in Simplified Chinese (简体中文).
+                    重要提示：叙述必须使用简体中文。
                     
-                    Return ONLY valid JSON:
+                    仅返回符合此结构的有效 JSON：
                     {
-                        "narrative": "string (Long, descriptive narrative)",
+                        "narrative": "string (长篇描述性叙述)",
                         "statChanges": { "hp": number, "mp": number, ... },
                         "newItems": [ 
                             { "name": "string", "type": "consumable"|"equipment"|"material", "effect": { "hp": number, "mp": number }, "count": number, "description": "string" }
                         ],
-                        "removedItems": ["string (Item Name)"],
+                        "removedItems": ["string (物品名)"],
                         "newSkills": [
                              { 
                                 "name": "string", 
@@ -307,19 +307,19 @@
                                 "description": "string" 
                             }
                         ],
-                        "removedSkills": ["string (Skill Name)"],
+                        "removedSkills": ["string (技能名)"],
                         "updatedSkills": [
-                             // Same structure as newSkills, will replace skill with same name
+                             // 结构同 newSkills，将替换同名技能
                         ],
                         "newEnemies": [
                             { 
                                 "name": "string", 
                                 "stats": { "hp": number, "maxHp": number, "attack": number, "defense": number, "speed": number },
-                                "skills": ["string (Skill Name or Description)"],
+                                "skills": ["string (技能名或描述)"],
                                 "traits": [
-                                    { "name": "string", "effect": "string (e.g. Lifesteal, Reflection)", "description": "string" }
+                                    { "name": "string", "effect": "string (例如：吸血, 反伤)", "description": "string" }
                                 ],
-                                "description": "string (Visual description)"
+                                "description": "string (视觉描述)"
                             }
                         ]
                     }
@@ -327,7 +327,7 @@
                 },
                 {
                     role: "user",
-                    content: `Previous: ${lastLog}\nPlayer Action: ${action}`
+                    content: `前情提要: ${lastLog}\n玩家行动: ${action}`
                 }
             ];
         };
@@ -338,50 +338,50 @@
             
             const enemyState = enemies.map((e, i) => {
                 const traits = e.traits ? e.traits.map(t => t.name).join(",") : "";
-                return `[${i}] ${e.name} (HP ${e.stats.hp}/${e.stats.maxHp}, Traits: ${traits})`;
+                return `[${i}] ${e.name} (HP ${e.stats.hp}/${e.stats.maxHp}, 特性: ${traits})`;
             }).join("\n");
             
             const playerSkills = player.skills.map(s => `${s.name} (${s.type}, ${s.cost}${s.costType})`).join(", ");
-            const playerBuffs = player.buffs ? JSON.stringify(player.buffs) : "None";
+            const playerBuffs = player.buffs ? JSON.stringify(player.buffs) : "无";
 
             return [
                 {
                     role: "system",
-                    content: `You are an RPG Combat Narrator.
-                    Player: ${player.name} (HP ${player.stats.hp}/${player.stats.maxHp}, MP ${player.stats.mp}/${player.stats.maxMp}).
-                    Player Skills: ${playerSkills}
-                    Player Buffs: ${playerBuffs}
+                    content: `你是一位 RPG 战斗解说员。
+                    玩家: ${player.name} (HP ${player.stats.hp}/${player.stats.maxHp}, MP ${player.stats.mp}/${player.stats.maxMp}).
+                    玩家技能: ${playerSkills}
+                    玩家 Buffs: ${playerBuffs}
                     
-                    Enemies:
+                    敌人:
                     ${enemyState}
                     
-                    Action: ${JSON.stringify(action)}
-                    Target Index: ${targetIndex}
+                    行动: ${JSON.stringify(action)}
+                    目标索引: ${targetIndex}
                     
-                    Task:
-                    1. Calculate damage dealt by player (consider buffs, enemy traits like Defense/Reflection).
-                    2. Calculate enemy turns (enemies attack player, consider their skills/traits).
-                    3. Manage Buffs/Debuffs (duration decreases, some might expire).
+                    任务:
+                    1. 计算玩家造成的伤害（考虑 Buffs、敌人特性如防御/反伤）。
+                    2. 计算敌人回合（敌人攻击玩家，考虑他们的技能/特性）。
+                    3. 管理 Buffs/Debuffs（持续时间减少，有些可能过期）。
                     
-                    ${showNarrative ? "Provide a vivid combat description." : "Provide a very brief summary."}
+                    ${showNarrative ? "提供生动的战斗描述。" : "提供非常简短的总结。"}
                     
-                    Return ONLY valid JSON:
+                    仅返回符合此结构的有效 JSON：
                     {
                         "narrative": "string",
-                        "playerStatChanges": { "hp": number, "mp": number, ... }, // Relative changes (e.g. -10 hp)
+                        "playerStatChanges": { "hp": number, "mp": number, ... }, // 相对变化 (例如 -10 hp)
                         "enemiesUpdates": [
                             { 
                                 "index": number, 
                                 "damageTaken": number, 
-                                "hpChange": number, // Optional override for healing/special
+                                "hpChange": number, // 可选覆盖，用于治疗/特殊情况
                                 "statusAdded": "string",
                                 "statusRemoved": "string"
                             }
                         ],
                         "playerBuffsAdded": [
-                             { "name": "string", "effect": "string (e.g. +10 ATK)", "duration": number (turns), "description": "string", "type": "buff"|"debuff" }
+                             { "name": "string", "effect": "string (例如 +10 攻击)", "duration": number (回合数), "description": "string", "type": "buff"|"debuff" }
                         ],
-                        "playerBuffsRemoved": ["string (Buff Name)"],
+                        "playerBuffsRemoved": ["string (Buff 名称)"],
                         "enemyBuffsAdded": [
                              { "enemyIndex": number, "buff": { "name": "string", "description": "string", "duration": number } }
                         ]
@@ -390,7 +390,7 @@
                 },
                 {
                     role: "user",
-                    content: `Execute Combat Turn.`
+                    content: `执行战斗回合。`
                 }
             ];
         };

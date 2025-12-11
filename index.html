@@ -282,9 +282,9 @@
             const chatHistory = history
                 .filter(log => log.type === 'narrative' || log.type === 'combat' || log.type === 'action')
                 .map(log => {
-                    // Combine narrative and combat logs into 'model' role
+                    // Combine narrative and combat logs into 'assistant' role
                     if (log.type === 'narrative' || log.type === 'combat') {
-                        return { role: "model", content: log.text };
+                        return { role: "assistant", content: log.text };
                     } else {
                         // User action
                         const cleanText = log.text.startsWith("> ") ? log.text.substring(2) : log.text;
